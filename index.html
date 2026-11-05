@@ -704,11 +704,11 @@
       <div class="grid-2">
         <div class="field">
           <label>Min. Kalış (Gece)</label>
-          <input type="number" id="minStay" value="4" min="1" max="60" onchange="updateQuerySummary(); recombine();" />
+          <input type="number" id="minStay" value="4" min="1" max="60" onchange="syncStayInputs('sidebar'); updateQuerySummary(); recombine();" />
         </div>
         <div class="field">
           <label>Maks. Kalış (Gece)</label>
-          <input type="number" id="maxStay" value="6" min="1" max="60" onchange="updateQuerySummary(); recombine();" />
+          <input type="number" id="maxStay" value="6" min="1" max="60" onchange="syncStayInputs('sidebar'); updateQuerySummary(); recombine();" />
         </div>
       </div>
 
@@ -836,27 +836,76 @@
         </div>
 
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 18px;">
-          <!-- SÜTUN 1: AKTARMA & SAAT ARALIĞI -->
+          <!-- SÜTUN 1: AKTARMA, SEYAHAT SÜRESİ & SAAT ARALIĞI -->
           <div style="background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 15px; display: flex; flex-direction: column; gap: 12px;">
-            <div class="section-title">🕒 Aktarma, Süre &amp; Kalkış Saatleri</div>
+            <div class="section-title">🕒 Aktarma, Seyahat Süresi &amp; Kalkış Saatleri</div>
 
             <div class="grid-2">
               <div class="field">
-                <label>Maksimum Aktarma</label>
-                <select id="maxStops" onchange="recombine()">
-                  <option value="">Tümü</option>
-                  <option value="0">Sadece Aktarmasız (Doğrulanmış 0)</option>
+                <label>🛫 Sadece Gidiş Aktarma</label>
+                <select id="outMaxStops" onchange="recombine()">
+                  <option value="">Tümü (Serbest)</option>
+                  <option value="0">Sadece Aktarmasız (Direkt)</option>
                   <option value="1">Maksimum 1 Aktarma</option>
+                  <option value="2">Maksimum 2 Aktarma</option>
                 </select>
               </div>
               <div class="field">
-                <label>Maks. Tek Yön Süresi</label>
+                <label>🛬 Dönüş Aktarma</label>
+                <select id="inMaxStops" onchange="recombine()">
+                  <option value="">Tümü (Serbest)</option>
+                  <option value="0">Sadece Aktarmasız (Direkt)</option>
+                  <option value="1">Maksimum 1 Aktarma</option>
+                  <option value="2">Maksimum 2 Aktarma</option>
+                </select>
+              </div>
+            </div>
+
+            <div style="display:flex; gap:6px; flex-wrap:wrap;">
+              <button type="button" onclick="setQuickStops('','')" style="background:var(--panel); border:1px solid var(--border); color:#cbd5e1; font-size:0.73rem; padding:4px 8px; border-radius:6px; cursor:pointer;">Tümü Serbest</button>
+              <button type="button" onclick="setQuickStops('0','')" style="background:var(--panel); border:1px solid var(--border); color:#93c5fd; font-size:0.73rem; padding:4px 8px; border-radius:6px; cursor:pointer;">Sadece Gidiş Aktarmasız</button>
+              <button type="button" onclick="setQuickStops('1','')" style="background:var(--panel); border:1px solid var(--border); color:#93c5fd; font-size:0.73rem; padding:4px 8px; border-radius:6px; cursor:pointer;">Sadece Gidiş Maks. 1</button>
+              <button type="button" onclick="setQuickStops('0','0')" style="background:var(--panel); border:1px solid var(--border); color:#cbd5e1; font-size:0.73rem; padding:4px 8px; border-radius:6px; cursor:pointer;">Gidiş &amp; Dönüş Aktarmasız</button>
+            </div>
+
+            <div class="grid-2">
+              <div class="field">
+                <label>⏱️ Maks. Tek Yön Uçuş Süresi</label>
                 <select id="maxFlightHours" onchange="recombine()">
                   <option value="">Sınırsız</option>
+                  <option value="3.5">Maks. 3.5 Saat</option>
+                  <option value="4">Maks. 4 Saat</option>
                   <option value="5">Maks. 5 Saat</option>
+                  <option value="6">Maks. 6 Saat</option>
                   <option value="8">Maks. 8 Saat</option>
+                  <option value="10">Maks. 10 Saat</option>
                   <option value="12">Maks. 12 Saat</option>
+                  <option value="16">Maks. 16 Saat</option>
                 </select>
+              </div>
+              <div class="field">
+                <label>⏳ Maks. Toplam Seyahat Süresi (G+D)</label>
+                <select id="maxTotalTravelHours" onchange="recombine()">
+                  <option value="">Sınırsız</option>
+                  <option value="7">Maks. 7 Saat (Toplam)</option>
+                  <option value="8">Maks. 8 Saat (Toplam)</option>
+                  <option value="10">Maks. 10 Saat (Toplam)</option>
+                  <option value="12">Maks. 12 Saat (Toplam)</option>
+                  <option value="15">Maks. 15 Saat (Toplam)</option>
+                  <option value="18">Maks. 18 Saat (Toplam)</option>
+                  <option value="24">Maks. 24 Saat (Toplam)</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="grid-2">
+              <div class="field">
+                <label>🌙 Min. Seyahat / Kalış (Gece)</label>
+                <input type="number" id="filterMinStay" value="4" min="1" max="60" onchange="syncStayInputs('filter'); updateQuerySummary(); recombine();" />
+              </div>
+              <div class="field">
+                <label>🌙 Maks. Seyahat / Kalış (Gece)</label>
+                <input type="number" id="filterMaxStay" value="6" min="1" max="60" onchange="syncStayInputs('filter'); updateQuerySummary(); recombine();" />
               </div>
             </div>
 
@@ -1399,6 +1448,26 @@
       recombine();
     }
 
+    function setQuickStops(outStops, inStops) {
+      document.getElementById("outMaxStops").value = outStops;
+      document.getElementById("inMaxStops").value = inStops;
+      recombine();
+    }
+
+    function syncStayInputs(source) {
+      const sMin = document.getElementById("minStay");
+      const sMax = document.getElementById("maxStay");
+      const fMin = document.getElementById("filterMinStay");
+      const fMax = document.getElementById("filterMaxStay");
+      if (source === "filter" && fMin && fMax) {
+        sMin.value = fMin.value;
+        sMax.value = fMax.value;
+      } else if (fMin && fMax) {
+        fMin.value = sMin.value;
+        fMax.value = sMax.value;
+      }
+    }
+
     function toggleBaggageFeeInputs() {
       const mode = document.getElementById("baggageMode").value;
       const box = document.getElementById("baggageFeeBox");
@@ -1483,8 +1552,10 @@
         max_results_per_route: parseInt(document.getElementById("maxResults").value || "10", 10),
         min_stay_days: parseInt(document.getElementById("minStay").value || "4", 10),
         max_stay_days: parseInt(document.getElementById("maxStay").value || "6", 10),
-        max_stops: document.getElementById("maxStops").value,
+        out_max_stops: document.getElementById("outMaxStops").value,
+        in_max_stops: document.getElementById("inMaxStops").value,
         max_flight_hours: document.getElementById("maxFlightHours").value,
+        max_total_travel_hours: document.getElementById("maxTotalTravelHours").value,
         out_dep_min_time: document.getElementById("outDepMin").value || "00:00",
         out_dep_max_time: document.getElementById("outDepMax").value || "23:59",
         in_dep_min_time: document.getElementById("inDepMin").value || "00:00",
@@ -1697,6 +1768,16 @@
       return String(val);
     }
 
+    function fmtDurationMinutes(mins) {
+      if (mins === null || mins === undefined || Number.isNaN(Number(mins)) || Number(mins) <= 0) {
+        return `<span style="color:#f59e0b">Doğrulanmadı</span>`;
+      }
+      const total = Math.round(Number(mins));
+      const h = Math.floor(total / 60);
+      const m = total % 60;
+      return m > 0 ? `${h} sa ${m} dk` : `${h} sa`;
+    }
+
     function fmtArrivalDateBadge(depDate, arrDate, offset) {
       if (!arrDate) return `<span style="color:#f59e0b">Varış tarihi doğrulanmadı</span>`;
       if (offset && offset > 0) {
@@ -1837,7 +1918,7 @@
             <div class="combo-card">
               <div class="combo-header">
                 <div class="combo-title">
-                  <span>#${idx + 1} | ${c.route_summary} (${c.stay_days} Gece Hedefte Kalış)</span>
+                  <span>#${idx + 1} | ${c.route_summary} (${c.stay_days} Gece Hedefte Kalış · ⏱️ Toplam Süre: ${fmtDurationMinutes(c.total_travel_minutes)})</span>
                   ${badge}
                 </div>
                 <div class="combo-price">
@@ -2005,8 +2086,10 @@
     }
 
     function resetPostFilters() {
-      document.getElementById("maxStops").value = "";
+      document.getElementById("outMaxStops").value = "";
+      document.getElementById("inMaxStops").value = "";
       document.getElementById("maxFlightHours").value = "";
+      document.getElementById("maxTotalTravelHours").value = "";
       document.getElementById("outDepMin").value = "00:00";
       document.getElementById("outDepMax").value = "23:59";
       document.getElementById("inDepMin").value = "00:00";
