@@ -268,6 +268,8 @@ def validate_search_request(
         "excluded_airlines": body.get("excluded_airlines", []) or [],
         "out_excluded_airlines": body.get("out_excluded_airlines", []) or [],
         "in_excluded_airlines": body.get("in_excluded_airlines", []) or [],
+        "out_excluded_airports": body.get("out_excluded_airports", []) or [],
+        "in_excluded_airports": body.get("in_excluded_airports", []) or [],
         "only_asymmetric": bool(body.get("only_asymmetric", False)),
         "include_transfer": bool(body.get("include_transfer", False)),
         "transfer_costs": body.get("transfer_costs", {}) or {},
@@ -669,6 +671,31 @@ class FlightFinderHandler(SimpleHTTPRequestHandler):
         )
         available_airlines = sorted(set(available_out_airlines) | set(available_in_airlines))
 
+        available_out_airports = list(
+            dict.fromkeys(
+                validated["target_airports"]
+                + sorted(
+                    {
+                        f.destination.strip().upper()
+                        for f in out_flights
+                        if f.destination and f.destination.strip()
+                    }
+                )
+            )
+        )
+        available_in_airports = list(
+            dict.fromkeys(
+                validated["target_airports"]
+                + sorted(
+                    {
+                        f.origin.strip().upper()
+                        for f in in_flights
+                        if f.origin and f.origin.strip()
+                    }
+                )
+            )
+        )
+
         if not has_data:
             return self._send_json(
                 {
@@ -683,6 +710,8 @@ class FlightFinderHandler(SimpleHTTPRequestHandler):
                     "available_airlines": [],
                     "available_out_airlines": [],
                     "available_in_airlines": [],
+                    "available_out_airports": validated["target_airports"],
+                    "available_in_airports": validated["target_airports"],
                     "outbound_flights": [],
                     "inbound_flights": [],
                     "query_summary": q_summary,
@@ -715,6 +744,8 @@ class FlightFinderHandler(SimpleHTTPRequestHandler):
             excluded_airlines=validated["excluded_airlines"],
             out_excluded_airlines=validated["out_excluded_airlines"],
             in_excluded_airlines=validated["in_excluded_airlines"],
+            out_excluded_airports=validated["out_excluded_airports"],
+            in_excluded_airports=validated["in_excluded_airports"],
             include_transfer=validated["include_transfer"],
             transfer_costs=validated["transfer_costs"],
             transfer_durations=validated["transfer_durations"],
@@ -746,6 +777,8 @@ class FlightFinderHandler(SimpleHTTPRequestHandler):
                 "available_airlines": available_airlines,
                 "available_out_airlines": available_out_airlines,
                 "available_in_airlines": available_in_airlines,
+                "available_out_airports": available_out_airports,
+                "available_in_airports": available_in_airports,
                 "outbound_flights": sanitize_records_for_json([f.to_dict() for f in out_flights]),
                 "inbound_flights": sanitize_records_for_json([f.to_dict() for f in in_flights]),
                 "query_summary": q_summary,

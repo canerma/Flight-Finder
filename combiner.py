@@ -139,6 +139,8 @@ def build_combinations_dataframe(
     excluded_airlines: Optional[List[str]] = None,
     out_excluded_airlines: Optional[List[str]] = None,
     in_excluded_airlines: Optional[List[str]] = None,
+    out_excluded_airports: Optional[List[str]] = None,
+    in_excluded_airports: Optional[List[str]] = None,
     include_transfer: bool = False,
     transfer_costs: Optional[Dict[str, float]] = None,
     transfer_durations: Optional[Dict[str, int]] = None,
@@ -245,6 +247,23 @@ def build_combinations_dataframe(
         df_out = df_out[~df_out["airline"].astype(str).str.lower().isin(out_excl)]
     if in_excl:
         df_in = df_in[~df_in["airline"].astype(str).str.lower().isin(in_excl)]
+
+    # 4b) Hariç tutulan hedef/kalkış havalimanları filtresi (gidiş destination ve dönüş origin ayrı)
+    out_excl_airports = {
+        str(code).strip().upper()
+        for code in (out_excluded_airports or [])
+        if code and str(code).strip()
+    }
+    in_excl_airports = {
+        str(code).strip().upper()
+        for code in (in_excluded_airports or [])
+        if code and str(code).strip()
+    }
+
+    if out_excl_airports:
+        df_out = df_out[~df_out["destination"].astype(str).str.upper().isin(out_excl_airports)]
+    if in_excl_airports:
+        df_in = df_in[~df_in["origin"].astype(str).str.upper().isin(in_excl_airports)]
 
     # 5) "Ücretsiz kabin bagajı" filtresinden YALNIZCA gerçek tekliften doğrulanmış (True) olanlar geçer
     if baggage_mode == "free_cabin_only":

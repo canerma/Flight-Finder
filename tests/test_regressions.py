@@ -1574,6 +1574,57 @@ class SmartFlightFinderRegressionTests(unittest.TestCase):
         self.assertEqual(df_sep.iloc[0]["out_airline"], "SunExpress")
         self.assertEqual(df_sep.iloc[0]["in_airline"], "Pegasus")
 
+        # Gidiş ve Dönüş ayrı havalimanı filtreleri (out_excluded_airports / in_excluded_airports)
+        out_flights_ap = out_flights + [
+            FlightOption(
+                origin="ESB",
+                destination="DUS",
+                date="2026-11-15",
+                airline="SunExpress",
+                departure_time="09:00",
+                arrival_time="12:00",
+                duration="4 sa",
+                duration_minutes=240,
+                stops=0,
+                stops_text="Aktarmasız",
+                price=2800.0,
+                currency="TRY",
+                booking_url="https://example.com",
+                arrival_day_offset=0,
+                arrival_date="2026-11-15",
+            )
+        ]
+        in_flights_ap = in_flights + [
+            FlightOption(
+                origin="DUS",
+                destination="ESB",
+                date="2026-11-20",
+                airline="SunExpress",
+                departure_time="15:00",
+                arrival_time="20:00",
+                duration="4 sa",
+                duration_minutes=240,
+                stops=0,
+                stops_text="Aktarmasız",
+                price=2900.0,
+                currency="TRY",
+                booking_url="https://example.com",
+                arrival_day_offset=0,
+                arrival_date="2026-11-20",
+            )
+        ]
+        df_ap = build_combinations_dataframe(
+            outbound_flights=out_flights_ap,
+            inbound_flights=in_flights_ap,
+            min_stay_days=5,
+            max_stay_days=5,
+            out_excluded_airports=["AMS"],
+            in_excluded_airports=["DUS"],
+            window_end="2026-11-25",
+        )
+        self.assertTrue((df_ap["out_destination"] == "DUS").all())
+        self.assertTrue((df_ap["in_origin"] == "AMS").all())
+
 
 if __name__ == "__main__":
     unittest.main()

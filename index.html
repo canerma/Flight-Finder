@@ -993,11 +993,39 @@
             </div>
           </div>
 
-          <!-- SÜTUN 3: HAVAYOLU SEÇİMİ (GİDİŞ VE DÖNÜŞ AYRI) -->
+          <!-- SÜTUN 3: HAVALİMANI & HAVAYOLU SEÇİMİ (GİDİŞ VE DÖNÜŞ AYRI) -->
           <div style="background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 15px; display: flex; flex-direction: column; gap: 12px;">
             <p style="font-size: 0.75rem; color: var(--muted); margin-bottom: -2px;">
-              Gidiş ve dönüş bacakları için istemediğiniz havayollarının işaretini ayrı ayrı kaldırabilirsiniz:
+              Gidiş ve dönüş bacakları için havalimanlarını ve havayollarını ayrı ayrı filtreleyebilirsiniz:
             </p>
+
+            <div class="grid-2" style="gap: 10px;">
+              <div>
+                <div class="section-title" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                  <span>🛫 Gidiş Havalimanı</span>
+                  <div style="display: flex; gap: 4px;">
+                    <button type="button" onclick="setLegAirports('out', true)" style="background:var(--panel); border:1px solid var(--border); color:#cbd5e1; font-size:0.68rem; padding:2px 6px; border-radius:5px; cursor:pointer;">Tümü</button>
+                    <button type="button" onclick="setLegAirports('out', false)" style="background:var(--panel); border:1px solid var(--border); color:#cbd5e1; font-size:0.68rem; padding:2px 6px; border-radius:5px; cursor:pointer;">Hiçbiri</button>
+                  </div>
+                </div>
+                <div id="outAirportFilterBox" class="transfer-box" style="background: var(--panel); max-height: 115px; overflow-y: auto; font-size: 0.80rem; color: var(--muted);">
+                  Gidiş havalimanları bekleniyor.
+                </div>
+              </div>
+
+              <div>
+                <div class="section-title" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                  <span>🛬 Dönüş Havalimanı</span>
+                  <div style="display: flex; gap: 4px;">
+                    <button type="button" onclick="setLegAirports('in', true)" style="background:var(--panel); border:1px solid var(--border); color:#cbd5e1; font-size:0.68rem; padding:2px 6px; border-radius:5px; cursor:pointer;">Tümü</button>
+                    <button type="button" onclick="setLegAirports('in', false)" style="background:var(--panel); border:1px solid var(--border); color:#cbd5e1; font-size:0.68rem; padding:2px 6px; border-radius:5px; cursor:pointer;">Hiçbiri</button>
+                  </div>
+                </div>
+                <div id="inAirportFilterBox" class="transfer-box" style="background: var(--panel); max-height: 115px; overflow-y: auto; font-size: 0.80rem; color: var(--muted);">
+                  Dönüş havalimanları bekleniyor.
+                </div>
+              </div>
+            </div>
 
             <div>
               <div class="section-title" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
@@ -1007,7 +1035,7 @@
                   <button type="button" onclick="setLegAirlines('out', false)" style="background:var(--panel); border:1px solid var(--border); color:#cbd5e1; font-size:0.72rem; padding:2px 7px; border-radius:5px; cursor:pointer;">Hiçbiri</button>
                 </div>
               </div>
-              <div id="outAirlineFilterBox" class="transfer-box" style="background: var(--panel); max-height: 155px; overflow-y: auto; font-size: 0.81rem; color: var(--muted);">
+              <div id="outAirlineFilterBox" class="transfer-box" style="background: var(--panel); max-height: 135px; overflow-y: auto; font-size: 0.81rem; color: var(--muted);">
                 Gidiş havayolu listesi bekleniyor.
               </div>
             </div>
@@ -1020,7 +1048,7 @@
                   <button type="button" onclick="setLegAirlines('in', false)" style="background:var(--panel); border:1px solid var(--border); color:#cbd5e1; font-size:0.72rem; padding:2px 7px; border-radius:5px; cursor:pointer;">Hiçbiri</button>
                 </div>
               </div>
-              <div id="inAirlineFilterBox" class="transfer-box" style="background: var(--panel); max-height: 155px; overflow-y: auto; font-size: 0.81rem; color: var(--muted);">
+              <div id="inAirlineFilterBox" class="transfer-box" style="background: var(--panel); max-height: 135px; overflow-y: auto; font-size: 0.81rem; color: var(--muted);">
                 Dönüş havayolu listesi bekleniyor.
               </div>
             </div>
@@ -1112,6 +1140,10 @@
     let inExcludedAirlinesSet = new Set();
     let knownOutAirlinesList = [];
     let knownInAirlinesList = [];
+    let outExcludedAirportsSet = new Set();
+    let inExcludedAirportsSet = new Set();
+    let knownOutAirportsList = [];
+    let knownInAirportsList = [];
     let combineRequestSeq = 0;
     let isWatchingProgress = false;
 
@@ -1147,7 +1179,10 @@
           if (shouldCheck) count++;
           return { ...a, checked: shouldCheck };
         });
+      outExcludedAirportsSet.clear();
+      inExcludedAirportsSet.clear();
       renderAirportChecklist();
+      renderPostAirportFilters(getTargetAirports(), getTargetAirports());
       renderTransferInputs();
       updateQuerySummary();
       recombine();
@@ -1192,6 +1227,7 @@
       }
       item.checked = isChecked;
       renderAirportChecklist();
+      renderPostAirportFilters(getTargetAirports(), getTargetAirports());
       renderTransferInputs();
       updateQuerySummary();
       recombine();
@@ -1232,6 +1268,7 @@
       }
       inp.value = "";
       renderAirportChecklist();
+      renderPostAirportFilters(getTargetAirports(), getTargetAirports());
       renderTransferInputs();
       updateQuerySummary();
       recombine();
@@ -1504,6 +1541,58 @@
       box.style.display = mode === "add_cabin_bag" || mode === "add_checked_bag" ? "grid" : "none";
     }
 
+    function getAirportNameByCode(code) {
+      const upper = String(code || "").toUpperCase();
+      const fromCurrent = currentAirportsState.find(a => a.code === upper);
+      if (fromCurrent && fromCurrent.name) return fromCurrent.name;
+      for (const c of CITY_PRESETS) {
+        const found = (c.airports || []).find(a => a.code === upper);
+        if (found && found.name) return found.name;
+      }
+      return "";
+    }
+
+    function renderLegAirportBox(boxId, codes, excludedSet, leg) {
+      const box = document.getElementById(boxId);
+      if (!box) return;
+      if (!codes || codes.length === 0) {
+        box.innerHTML = "Seçili havalimanı yok.";
+        return;
+      }
+      box.innerHTML = codes
+        .map(code => {
+          const upper = String(code || "").toUpperCase();
+          const isChecked = !excludedSet.has(upper);
+          const name = getAirportNameByCode(upper);
+          const nameSuffix = name ? ` <span style="color:var(--muted); font-size:0.75rem;">— ${name}</span>` : "";
+          return `
+            <label style="display:flex; align-items:center; gap:7px; padding:2px 0; cursor:pointer; color:#e2e8f0;">
+              <input type="checkbox" ${isChecked ? "checked" : ""} onchange="toggleLegAirportFilter('${leg}', '${upper}', this.checked)" />
+              <span><b>${upper}</b>${nameSuffix}</span>
+            </label>
+          `;
+        })
+        .join("");
+    }
+
+    function renderPostAirportFilters(outCodes, inCodes) {
+      knownOutAirportsList = outCodes && outCodes.length ? outCodes : getTargetAirports();
+      knownInAirportsList = inCodes && inCodes.length ? inCodes : getTargetAirports();
+      renderLegAirportBox("outAirportFilterBox", knownOutAirportsList, outExcludedAirportsSet, "out");
+      renderLegAirportBox("inAirportFilterBox", knownInAirportsList, inExcludedAirportsSet, "in");
+    }
+
+    function toggleLegAirportFilter(leg, code, isChecked) {
+      const targetSet = leg === "out" ? outExcludedAirportsSet : inExcludedAirportsSet;
+      const upper = String(code || "").toUpperCase();
+      if (isChecked) {
+        targetSet.delete(upper);
+      } else {
+        targetSet.add(upper);
+      }
+      recombine();
+    }
+
     function renderLegAirlineBox(boxId, airlines, excludedSet, leg) {
       const box = document.getElementById(boxId);
       if (!box) return;
@@ -1602,6 +1691,8 @@
         checked_bag_fee: parseFloat(document.getElementById("checkedBagFee").value || "0"),
         out_excluded_airlines: Array.from(outExcludedAirlinesSet),
         in_excluded_airlines: Array.from(inExcludedAirlinesSet),
+        out_excluded_airports: Array.from(outExcludedAirportsSet),
+        in_excluded_airports: Array.from(inExcludedAirportsSet),
         only_asymmetric: document.getElementById("onlyAsymmetric").checked,
         include_transfer: document.getElementById("includeTransfer").checked,
         transfer_costs,
@@ -1919,6 +2010,10 @@
       if (data.cached_queries) {
         updateCachedQueriesUI(data.cached_queries, data.cache_error);
       }
+      renderPostAirportFilters(
+        data.available_out_airports || getTargetAirports(),
+        data.available_in_airports || getTargetAirports()
+      );
       renderAirlineFilters(
         data.available_out_airlines || data.available_airlines || [],
         data.available_in_airlines || data.available_airlines || []
@@ -2144,6 +2239,18 @@
       }
     }
 
+    function setLegAirports(leg, selectAll) {
+      const exclSet = leg === "out" ? outExcludedAirportsSet : inExcludedAirportsSet;
+      const knownList = leg === "out" ? knownOutAirportsList : knownInAirportsList;
+      if (selectAll) {
+        exclSet.clear();
+      } else {
+        knownList.forEach(c => exclSet.add(String(c).toUpperCase()));
+      }
+      renderPostAirportFilters(knownOutAirportsList, knownInAirportsList);
+      recombine();
+    }
+
     function setLegAirlines(leg, selectAll) {
       const exclSet = leg === "out" ? outExcludedAirlinesSet : inExcludedAirlinesSet;
       const knownList = leg === "out" ? knownOutAirlinesList : knownInAirlinesList;
@@ -2170,8 +2277,11 @@
       document.getElementById("includeTransfer").checked = false;
       toggleBaggageFeeInputs();
       toggleTransferBox();
+      outExcludedAirportsSet.clear();
+      inExcludedAirportsSet.clear();
       outExcludedAirlinesSet.clear();
       inExcludedAirlinesSet.clear();
+      renderPostAirportFilters(knownOutAirportsList, knownInAirportsList);
       renderAirlineFilters(knownOutAirlinesList, knownInAirlinesList);
       recombine();
     }
