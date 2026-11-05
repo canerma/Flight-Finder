@@ -1,0 +1,2064 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Smart Flight Finder | Kişisel Akıllı Uçuş Bulucu</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --panel: #1e293b;
+      --panel-alt: #273549;
+      --border: #334155;
+      --text: #f8fafc;
+      --muted: #94a3b8;
+      --primary: #3b82f6;
+      --primary-hover: #2563eb;
+      --accent: #10b981;
+      --warn: #f59e0b;
+      --danger: #ef4444;
+      --badge-asym: #8b5cf6;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, sans-serif;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    header {
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+      padding: 14px 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+
+    header h1 {
+      font-size: 1.3rem;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    header p {
+      color: var(--muted);
+      font-size: 0.84rem;
+      margin-top: 3px;
+    }
+
+    .rules-banner {
+      background: rgba(59, 130, 246, 0.08);
+      border: 1px solid rgba(59, 130, 246, 0.28);
+      border-radius: 8px;
+      padding: 8px 12px;
+      font-size: 0.77rem;
+      color: #cbd5e1;
+      line-height: 1.45;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 350px 1fr;
+      gap: 20px;
+      padding: 20px;
+      flex: 1;
+    }
+
+    @media (max-width: 960px) {
+      .layout {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .sidebar {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      height: fit-content;
+    }
+
+    .section-title {
+      font-size: 0.92rem;
+      font-weight: 600;
+      color: #e2e8f0;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 7px;
+      margin-bottom: 2px;
+    }
+
+    .field {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+
+    .field label {
+      font-size: 0.79rem;
+      color: var(--muted);
+      font-weight: 500;
+    }
+
+    .field input[type="text"],
+    .field input[type="number"],
+    .field input[type="date"],
+    .field input[type="time"],
+    .field select {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 8px 10px;
+      border-radius: 8px;
+      font-size: 0.88rem;
+      outline: none;
+    }
+
+    .field input:focus,
+    .field select:focus {
+      border-color: var(--primary);
+    }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+
+    .checkbox-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.84rem;
+      color: #cbd5e1;
+      cursor: pointer;
+    }
+
+    .checkbox-row input {
+      width: 16px;
+      height: 16px;
+      accent-color: var(--primary);
+    }
+
+    .btn-primary {
+      background: var(--primary);
+      color: white;
+      border: none;
+      padding: 11px 16px;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 0.92rem;
+      cursor: pointer;
+      transition: background 0.15s;
+      width: 100%;
+    }
+
+    .btn-primary:hover:not(:disabled) {
+      background: var(--primary-hover);
+    }
+
+    .btn-primary:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
+    .btn-danger {
+      background: var(--danger);
+      color: white;
+      border: none;
+      padding: 7px 14px;
+      border-radius: 7px;
+      font-weight: 600;
+      font-size: 0.82rem;
+      cursor: pointer;
+    }
+
+    .query-summary {
+      background: rgba(59, 130, 246, 0.1);
+      border: 1px solid rgba(59, 130, 246, 0.3);
+      border-radius: 8px;
+      padding: 10px 12px;
+      font-size: 0.79rem;
+      color: #bfdbfe;
+      line-height: 1.5;
+    }
+
+    .transfer-box {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .transfer-row {
+      display: grid;
+      grid-template-columns: 50px 1fr 1fr;
+      gap: 8px;
+      align-items: center;
+      font-size: 0.82rem;
+    }
+
+    .transfer-row span {
+      font-weight: 700;
+      color: #93c5fd;
+    }
+
+    .transfer-row input {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 6px 8px;
+      border-radius: 6px;
+      width: 100%;
+      font-size: 0.82rem;
+    }
+
+    .airport-checklist {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      max-height: 220px;
+      overflow-y: auto;
+    }
+
+    .airport-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 6px 8px;
+      border-radius: 6px;
+      background: var(--panel);
+      border: 1px solid transparent;
+      cursor: pointer;
+      font-size: 0.8rem;
+    }
+
+    .airport-item.checked {
+      border-color: rgba(59, 130, 246, 0.55);
+      background: rgba(59, 130, 246, 0.1);
+    }
+
+    .airport-left {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .airport-code {
+      font-weight: 700;
+      color: #93c5fd;
+      min-width: 34px;
+      display: inline-block;
+    }
+
+    .airport-meta {
+      font-size: 0.72rem;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+
+    .custom-airport-row {
+      display: flex;
+      gap: 6px;
+      margin-top: 4px;
+    }
+
+    .custom-airport-row input {
+      flex: 1;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 6px 9px;
+      border-radius: 6px;
+      font-size: 0.8rem;
+      text-transform: uppercase;
+    }
+
+    .custom-airport-row button {
+      background: var(--panel-alt);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 6px 10px;
+      border-radius: 6px;
+      font-size: 0.78rem;
+      cursor: pointer;
+      font-weight: 600;
+    }
+
+    .main {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .alert-box {
+      padding: 11px 15px;
+      border-radius: 9px;
+      font-size: 0.84rem;
+      display: none;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .alert-box.error {
+      background: rgba(239, 68, 68, 0.14);
+      border: 1px solid rgba(239, 68, 68, 0.45);
+      color: #fecaca;
+    }
+
+    .alert-box.warn {
+      background: rgba(245, 158, 11, 0.14);
+      border: 1px solid rgba(245, 158, 11, 0.45);
+      color: #fde68a;
+    }
+
+    .alert-box.info {
+      background: rgba(16, 185, 129, 0.12);
+      border: 1px solid rgba(16, 185, 129, 0.4);
+      color: #a7f3d0;
+    }
+
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 14px;
+    }
+
+    @media (max-width: 768px) {
+      .metrics {
+        grid-template-columns: repeat(2, 1fr);
+      }
+    }
+
+    .metric-card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 13px 15px;
+    }
+
+    .metric-card .label {
+      font-size: 0.77rem;
+      color: var(--muted);
+      margin-bottom: 5px;
+    }
+
+    .metric-card .value {
+      font-size: 1.35rem;
+      font-weight: 700;
+      color: var(--text);
+    }
+
+    .metric-card .value.highlight {
+      color: var(--accent);
+    }
+
+    .progress-container {
+      background: var(--panel);
+      border: 1px solid var(--primary);
+      border-radius: 10px;
+      padding: 14px 18px;
+      display: none;
+      flex-direction: column;
+      gap: 9px;
+    }
+
+    .progress-bar-bg {
+      width: 100%;
+      height: 10px;
+      background: var(--bg);
+      border-radius: 999px;
+      overflow: hidden;
+    }
+
+    .progress-bar-fill {
+      height: 100%;
+      background: linear-gradient(90deg, var(--primary), var(--accent));
+      width: 0%;
+      transition: width 0.25s ease;
+    }
+
+    .progress-stats {
+      display: flex;
+      gap: 14px;
+      font-size: 0.78rem;
+      color: #cbd5e1;
+      flex-wrap: wrap;
+    }
+
+    .tabs {
+      display: flex;
+      gap: 10px;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 10px;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+    }
+
+    .tab-buttons {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .tab-btn {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      color: var(--muted);
+      padding: 8px 14px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 0.85rem;
+      font-weight: 600;
+    }
+
+    .tab-btn.active {
+      background: var(--primary);
+      border-color: var(--primary);
+      color: white;
+    }
+
+    .btn-secondary {
+      background: var(--panel-alt);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 7px 12px;
+      border-radius: 7px;
+      cursor: pointer;
+      font-size: 0.81rem;
+      text-decoration: none;
+      font-weight: 600;
+    }
+
+    .btn-secondary:hover {
+      border-color: var(--primary);
+    }
+
+    .cards-list {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .combo-card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .combo-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 10px;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    .combo-title {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 1.02rem;
+      font-weight: 700;
+      flex-wrap: wrap;
+    }
+
+    .badge {
+      font-size: 0.74rem;
+      padding: 3px 9px;
+      border-radius: 999px;
+      font-weight: 600;
+    }
+
+    .badge.asym {
+      background: rgba(139, 92, 246, 0.2);
+      color: #c4b5fd;
+      border: 1px solid rgba(139, 92, 246, 0.4);
+    }
+
+    .badge.sym {
+      background: rgba(59, 130, 246, 0.15);
+      color: #93c5fd;
+      border: 1px solid rgba(59, 130, 246, 0.3);
+    }
+
+    .combo-price {
+      text-align: right;
+    }
+
+    .combo-price .total {
+      font-size: 1.32rem;
+      font-weight: 800;
+      color: var(--accent);
+    }
+
+    .combo-price .sub {
+      font-size: 0.75rem;
+      color: var(--muted);
+    }
+
+    .legs-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+    }
+
+    @media (max-width: 720px) {
+      .legs-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .leg-box {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .leg-top {
+      display: flex;
+      justify-content: space-between;
+      font-weight: 700;
+      font-size: 0.91rem;
+      color: #e2e8f0;
+    }
+
+    .leg-meta {
+      font-size: 0.81rem;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+
+    .leg-link {
+      margin-top: 4px;
+      display: inline-block;
+      background: var(--panel-alt);
+      color: #93c5fd;
+      text-decoration: none;
+      padding: 6px 11px;
+      border-radius: 6px;
+      font-size: 0.79rem;
+      font-weight: 600;
+      text-align: center;
+      border: 1px solid var(--border);
+    }
+
+    .leg-link:hover {
+      background: var(--primary);
+      color: white;
+      border-color: var(--primary);
+    }
+
+    .combo-footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 8px;
+      padding-top: 6px;
+      border-top: 1px dashed var(--border);
+      font-size: 0.77rem;
+      color: var(--muted);
+    }
+
+    .recheck-result {
+      font-size: 0.8rem;
+      padding: 8px 12px;
+      border-radius: 7px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      display: none;
+    }
+
+    .table-wrap {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow-x: auto;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.81rem;
+      text-align: left;
+    }
+
+    th, td {
+      padding: 9px 11px;
+      border-bottom: 1px solid var(--border);
+      white-space: nowrap;
+    }
+
+    th {
+      background: var(--panel-alt);
+      color: #cbd5e1;
+      font-weight: 600;
+    }
+
+    .empty-state {
+      background: var(--panel);
+      border: 1px dashed var(--border);
+      border-radius: 12px;
+      padding: 36px 20px;
+      text-align: center;
+      color: var(--muted);
+      line-height: 1.6;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>✈️ Smart Flight Finder</h1>
+      <p>Ayrık Tek Yön (Decoupled One-Way) Tarama &amp; Simetrik/Asimetrik Kombinasyon Motoru</p>
+    </div>
+    <div class="rules-banner">
+      ℹ️ <b>Hesaplama Kuralları:</b> Sonuçlar <b>bağımsız iki tek yön uçuş teklifinin toplamıdır</b>.<br>
+      • <b>Kalış Gecesi:</b> Gidişin hedefe <i>varış yerel tarihi</i> ile dönüşün <i>kalkış yerel tarihi</i> arasındaki farktır (Örn: 1 Ara kalkış, 2 Ara +1 varış, 6 Ara dönüş = 4 gece).<br>
+      • <b>Son Gün Sınırı:</b> Seçilen bitiş tarihi, kalkış havalimanına (örn. ESB) en geç varış tarihidir.
+    </div>
+  </header>
+
+  <div class="layout">
+    <!-- SOL PANEL: ARAMA PARAMETRELERİ -->
+    <aside class="sidebar">
+      <div class="section-title">🔍 Rota &amp; Hedef Şehir Seçimi</div>
+
+      <div class="field">
+        <label>Kalkış ve Geri Dönüş Havalimanı (IATA)</label>
+        <select id="homeAirport">
+          <option value="ESB" selected>ESB — Ankara Esenboğa</option>
+          <option value="SAW">SAW — İstanbul Sabiha Gökçen</option>
+          <option value="IST">IST — İstanbul Havalimanı</option>
+          <option value="ADB">ADB — İzmir Adnan Menderes</option>
+          <option value="AYT">AYT — Antalya</option>
+          <option value="COV">COV — Çukurova (Adana/Mersin)</option>
+          <option value="TZX">TZX — Trabzon</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label>📍 Hedef Şehir / Bölge Seçin</label>
+        <select id="targetCity" onchange="onCityChange()"></select>
+      </div>
+
+      <div class="field">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <label>🛬 Hedef Havalimanları (En Fazla 3)</label>
+          <span id="selectedAirportCount" style="font-size: 0.74rem; color: #93c5fd; font-weight: 600;">3 / 3 seçili</span>
+        </div>
+        <div id="airportChecklist" class="airport-checklist"></div>
+        <div class="custom-airport-row">
+          <input type="text" id="customAirportInput" maxlength="3" placeholder="3 harfli IATA (Örn: LUX)" />
+          <button type="button" onclick="addCustomAirport()">+ Ekle</button>
+        </div>
+      </div>
+
+      <div class="grid-2">
+        <div class="field">
+          <label>En Erken Gidiş Tarihi</label>
+          <input type="date" id="windowStart" />
+        </div>
+        <div class="field">
+          <label>En Geç Eve Varış Tarihi</label>
+          <input type="date" id="windowEnd" />
+        </div>
+      </div>
+
+      <div class="grid-2">
+        <div class="field">
+          <label>Min. Kalış (Gece)</label>
+          <input type="number" id="minStay" value="4" min="1" max="60" onchange="updateQuerySummary(); recombine();" />
+        </div>
+        <div class="field">
+          <label>Maks. Kalış (Gece)</label>
+          <input type="number" id="maxStay" value="6" min="1" max="60" onchange="updateQuerySummary(); recombine();" />
+        </div>
+      </div>
+
+      <div class="grid-2">
+        <div class="field">
+          <label>Para Birimi</label>
+          <select id="currency">
+            <option value="TRY" selected>TRY (₺)</option>
+            <option value="EUR">EUR (€)</option>
+            <option value="USD">USD ($)</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Rota Başı Sonuç Limiti</label>
+          <input type="number" id="maxResults" value="10" min="1" max="50" />
+        </div>
+      </div>
+
+      <div id="querySummary" class="query-summary"></div>
+
+      <button id="scrapeBtn" class="btn-primary" onclick="startScrape()">
+        🚀 Uçuşları Tara &amp; Kombinasyon Bul
+      </button>
+
+      <div class="section-title" style="margin-top: 6px; display: flex; justify-content: space-between; align-items: center;">
+        <span>⚡ Bugün Taranan Sorgular (<span id="cacheCountBadge">0</span>)</span>
+        <button onclick="clearTodayCache()" style="background: transparent; border: 1px solid var(--border); color: var(--muted); font-size: 0.72rem; padding: 2px 7px; border-radius: 5px; cursor: pointer;">
+          Temizle
+        </button>
+      </div>
+      <div id="cachedQueriesBox" class="transfer-box" style="max-height: 170px; overflow-y: auto; font-size: 0.74rem; color: var(--muted);">
+        Henüz bugün taranmış sorgu yok.
+      </div>
+    </aside>
+
+    <!-- SAĞ PANEL: SONUÇLAR -->
+    <main class="main">
+      <!-- Uyarı / Durum Kutusu -->
+      <div id="statusAlertBox" class="alert-box"></div>
+
+      <!-- Canlı İlerleme Çubuğu -->
+      <div id="progressBox" class="progress-container">
+        <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.85rem; gap: 10px;">
+          <span id="progressLabel">Playwright hazırlanıyor...</span>
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <span id="progressCount" style="font-weight: 700;">0 / 0</span>
+            <button type="button" id="stopScrapeBtn" class="btn-danger" onclick="stopActiveScrape()">⏹️ Durdur</button>
+          </div>
+        </div>
+        <div class="progress-bar-bg">
+          <div id="progressFill" class="progress-bar-fill"></div>
+        </div>
+        <div id="progressStats" class="progress-stats">
+          <span>✅ Başarılı: <b id="pStatSuccess">0</b></span>
+          <span>⚪ Uçuş Yok: <b id="pStatNoRes">0</b></span>
+          <span>❌ Hatalı: <b id="pStatFailed">0</b></span>
+          <span>⚡ Önbellekten: <b id="pStatCache">0</b></span>
+        </div>
+      </div>
+
+      <!-- Özet Metrikler -->
+      <div class="metrics">
+        <div class="metric-card">
+          <div class="label">Doğrulanan Gidiş Uçuşu</div>
+          <div class="value" id="mOutCount">0</div>
+        </div>
+        <div class="metric-card">
+          <div class="label">Doğrulanan Dönüş Uçuşu</div>
+          <div class="value" id="mInCount">0</div>
+        </div>
+        <div class="metric-card">
+          <div class="label">Uygun Kombinasyon</div>
+          <div class="value" id="mComboCount">0</div>
+        </div>
+        <div class="metric-card">
+          <div class="label">En Düşük Toplam Maliyet</div>
+          <div class="value highlight" id="mBestPrice">-</div>
+        </div>
+      </div>
+
+      <!-- Sekmeler -->
+      <div class="tabs">
+        <div class="tab-buttons">
+          <button class="tab-btn active" id="tabBtnCards" onclick="switchTab('cards')">
+            🏆 En İyi Seçenek Kartları
+          </button>
+          <button class="tab-btn" id="tabBtnTable" onclick="switchTab('table')">
+            📊 Tüm Kombinasyonlar Tablosu
+          </button>
+          <button class="tab-btn" id="tabBtnRaw" onclick="switchTab('raw')">
+            🛫 Ham Tek Yön Uçuşlar
+          </button>
+          <button class="tab-btn" id="tabBtnFilters" onclick="switchTab('filters')">
+            ⚙️ Uçuş Sonrası Filtreleme
+          </button>
+        </div>
+        <button class="btn-secondary" onclick="downloadCSV()">📥 CSV Olarak İndir</button>
+      </div>
+
+      <!-- Sekme İçerikleri -->
+      <div id="viewCards" class="cards-list">
+        <div class="empty-state">
+          Bu arama için henüz veri yok. Sol menüden <b>"Uçuşları Tara &amp; Kombinasyon Bul"</b> butonuna tıklayın.
+        </div>
+      </div>
+
+      <div id="viewTable" class="table-wrap" style="display: none;"></div>
+      <div id="viewRaw" class="table-wrap" style="display: none;"></div>
+
+      <!-- UÇUŞ SONRASI FİLTRELEME SEKMESİ -->
+      <div id="viewFilters" style="display: none; background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 20px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); padding-bottom: 12px; margin-bottom: 16px; flex-wrap: wrap; gap: 10px;">
+          <div>
+            <h3 style="font-size: 1.05rem;">⚙️ Uçuş Sonrası Anlık Filtreleme &amp; Tahmini Maliyet Hesaplayıcı</h3>
+            <p style="font-size: 0.8rem; color: var(--muted); margin-top: 3px;">
+              Doğrulanmamış (bilinmeyen) aktarma, süre veya saat bilgileri ilgili filtre aktifken otomatik elenir.
+            </p>
+          </div>
+          <div style="display: flex; gap: 8px;">
+            <button type="button" class="btn-secondary" onclick="resetPostFilters()">🔄 Filtreleri Sıfırla</button>
+            <button type="button" class="btn-primary" style="width: auto; padding: 8px 16px;" onclick="switchTab('cards')">
+              ✅ Sonuçları Gör
+            </button>
+          </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 18px;">
+          <!-- SÜTUN 1: AKTARMA & SAAT ARALIĞI -->
+          <div style="background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 15px; display: flex; flex-direction: column; gap: 12px;">
+            <div class="section-title">🕒 Aktarma, Süre &amp; Kalkış Saatleri</div>
+
+            <div class="grid-2">
+              <div class="field">
+                <label>Maksimum Aktarma</label>
+                <select id="maxStops" onchange="recombine()">
+                  <option value="">Tümü</option>
+                  <option value="0">Sadece Aktarmasız (Doğrulanmış 0)</option>
+                  <option value="1">Maksimum 1 Aktarma</option>
+                </select>
+              </div>
+              <div class="field">
+                <label>Maks. Tek Yön Süresi</label>
+                <select id="maxFlightHours" onchange="recombine()">
+                  <option value="">Sınırsız</option>
+                  <option value="5">Maks. 5 Saat</option>
+                  <option value="8">Maks. 8 Saat</option>
+                  <option value="12">Maks. 12 Saat</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="field">
+              <label>🛫 Gidiş Kalkış Saati Aralığı</label>
+              <div class="grid-2">
+                <input type="time" id="outDepMin" value="00:00" onchange="recombine()" />
+                <input type="time" id="outDepMax" value="23:59" onchange="recombine()" />
+              </div>
+            </div>
+
+            <div class="field">
+              <label>🛬 Dönüş Kalkış Saati Aralığı</label>
+              <div class="grid-2">
+                <input type="time" id="inDepMin" value="00:00" onchange="recombine()" />
+                <input type="time" id="inDepMax" value="23:59" onchange="recombine()" />
+              </div>
+            </div>
+
+            <div style="display:flex; gap:6px; flex-wrap:wrap;">
+              <button type="button" onclick="setQuickTime('00:00','23:59','00:00','23:59')" style="background:var(--panel); border:1px solid var(--border); color:#cbd5e1; font-size:0.74rem; padding:5px 8px; border-radius:6px; cursor:pointer;">Tüm Saatler</button>
+              <button type="button" onclick="setQuickTime('06:00','23:00','08:00','23:59')" style="background:var(--panel); border:1px solid var(--border); color:#cbd5e1; font-size:0.74rem; padding:5px 8px; border-radius:6px; cursor:pointer;">Gece Yarısı Hariç (06:00+)</button>
+              <button type="button" onclick="setQuickTime('07:00','15:00','11:00','23:59')" style="background:var(--panel); border:1px solid var(--border); color:#cbd5e1; font-size:0.74rem; padding:5px 8px; border-radius:6px; cursor:pointer;">Sabah Gidiş / Öğle+ Dönüş</button>
+            </div>
+
+            <label class="checkbox-row" style="margin-top: 4px;">
+              <input type="checkbox" id="onlyAsymmetric" onchange="recombine()" />
+              Sadece asimetrik rotaları göster (Farklı havalimanından dönüş)
+            </label>
+          </div>
+
+          <!-- SÜTUN 2: BAGAJ & KARA ULAŞIMI -->
+          <div style="background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 15px; display: flex; flex-direction: column; gap: 12px;">
+            <div class="section-title">🧳 Bagaj &amp; 🚆 Tahmini Kara Ulaşımı</div>
+
+            <div class="field">
+              <label>Bagaj Filtresi &amp; Tahmini Ek Ücret</label>
+              <select id="baggageMode" onchange="toggleBaggageFeeInputs(); recombine();">
+                <option value="none" selected>Baz Fiyat (Ek Bagaj Ücreti Ekleme)</option>
+                <option value="add_cabin_bag">Kabin Bagajı Tahmini Ekle (Manuel Tutar)</option>
+                <option value="add_checked_bag">Uçak Altı Bagaj Tahmini Ekle (Manuel Tutar)</option>
+                <option value="free_cabin_only">Yalnızca Kabin Bagajı Doğrulanmış Teklifler</option>
+              </select>
+            </div>
+
+            <div id="baggageFeeBox" class="grid-2" style="display: none;">
+              <div class="field">
+                <label>Tahmini Kabin Bagajı (Tek Yön)</label>
+                <input type="number" id="cabinBagFee" value="650" min="0" step="50" onchange="recombine()" />
+              </div>
+              <div class="field">
+                <label>Tahmini Alt Bagaj (Tek Yön)</label>
+                <input type="number" id="checkedBagFee" value="1100" min="0" step="50" onchange="recombine()" />
+              </div>
+            </div>
+
+            <div class="section-title" style="margin-top: 4px;">🚆 Havalimanı → Hedef Şehir Transfer Tahmini</div>
+
+            <label class="checkbox-row">
+              <input type="checkbox" id="includeTransfer" onchange="toggleTransferBox(); recombine();" />
+              Tahmini tren/otobüs transfer maliyetini toplama ekle
+            </label>
+
+            <div id="transferBox" class="transfer-box" style="display: none; background: var(--panel);">
+              <div class="field">
+                <label>Manuel Kur Çarpanı (1 EUR = ? Seçili Para Birimi)</label>
+                <div style="display: flex; gap: 6px; align-items: center;">
+                  <input type="number" id="manualEurRate" value="1.0" min="0.01" step="0.5" style="width: 110px;" onchange="applyManualRateToTransfers()" />
+                  <button type="button" class="btn-secondary" onclick="applyManualRateToTransfers()">EUR Tahminlerini Çarp</button>
+                </div>
+                <span id="rateInfoLabel" style="font-size: 0.72rem; color: var(--muted);">
+                  Not: Sabit kur varsayılmaz. EUR referans değerlerini kendi kurunuzla çarpabilir veya aşağıdan doğrudan düzenleyebilirsiniz.
+                </span>
+              </div>
+              <div style="font-size: 0.74rem; color: var(--muted); display: grid; grid-template-columns: 50px 1fr 1fr; gap: 8px; margin-top: 4px;">
+                <span>Kod</span>
+                <span>Tahmini Tek Yön Ücret</span>
+                <span>Tahmini Süre (dk)</span>
+              </div>
+              <div id="transferInputs"></div>
+            </div>
+          </div>
+
+          <!-- SÜTUN 3: HAVAYOLU SEÇİMİ -->
+          <div style="background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 15px; display: flex; flex-direction: column; gap: 10px;">
+            <div class="section-title" style="display: flex; justify-content: space-between; align-items: center;">
+              <span>✈️ Havayolu Filtresi</span>
+              <div style="display: flex; gap: 6px;">
+                <button type="button" onclick="setAllAirlines(true)" style="background:var(--panel); border:1px solid var(--border); color:#cbd5e1; font-size:0.72rem; padding:2px 7px; border-radius:5px; cursor:pointer;">Tümü</button>
+                <button type="button" onclick="setAllAirlines(false)" style="background:var(--panel); border:1px solid var(--border); color:#cbd5e1; font-size:0.72rem; padding:2px 7px; border-radius:5px; cursor:pointer;">Hiçbiri</button>
+              </div>
+            </div>
+            <p style="font-size: 0.75rem; color: var(--muted);">
+              İstemediğiniz havayollarının işaretini kaldırarak kombinasyonlardan çıkarabilirsiniz:
+            </p>
+            <div id="airlineFilterBox" class="transfer-box" style="background: var(--panel); max-height: 240px; overflow-y: auto; font-size: 0.81rem; color: var(--muted);">
+              Bu arama için doğrulanmış havayolu listesi bekleniyor.
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    const MAX_TARGET_AIRPORTS = 3;
+
+    const CITY_PRESETS = [
+      {
+        id: "eindhoven",
+        label: "🇳🇱 Eindhoven / Güney Hollanda",
+        airports: [
+          { code: "AMS", name: "Amsterdam Schiphol", dist: "120 km", cost_eur: 23, duration_min: 80, checked: true },
+          { code: "DUS", name: "Düsseldorf", dist: "110 km", cost_eur: 19, duration_min: 105, checked: true },
+          { code: "CGN", name: "Köln / Bonn", dist: "150 km", cost_eur: 25, duration_min: 150, checked: true },
+          { code: "EIN", name: "Eindhoven", dist: "8 km", cost_eur: 5, duration_min: 20, checked: false },
+          { code: "BRU", name: "Brüksel Zaventem", dist: "115 km", cost_eur: 22, duration_min: 110, checked: false },
+          { code: "CRL", name: "Brüksel Charleroi", dist: "155 km", cost_eur: 26, duration_min: 145, checked: false },
+          { code: "NRN", name: "Weeze (Niederrhein)", dist: "60 km", cost_eur: 18, duration_min: 75, checked: false },
+          { code: "RTM", name: "Rotterdam / Lahey", dist: "110 km", cost_eur: 21, duration_min: 85, checked: false }
+        ]
+      },
+      {
+        id: "amsterdam",
+        label: "🇳🇱 Amsterdam / Utrecht / Randstad",
+        airports: [
+          { code: "AMS", name: "Amsterdam Schiphol", dist: "15 km", cost_eur: 6, duration_min: 15, checked: true },
+          { code: "RTM", name: "Rotterdam / Lahey", dist: "60 km", cost_eur: 15, duration_min: 50, checked: true },
+          { code: "EIN", name: "Eindhoven", dist: "120 km", cost_eur: 23, duration_min: 85, checked: true },
+          { code: "DUS", name: "Düsseldorf", dist: "215 km", cost_eur: 29, duration_min: 135, checked: false },
+          { code: "BRU", name: "Brüksel Zaventem", dist: "195 km", cost_eur: 28, duration_min: 115, checked: false }
+        ]
+      },
+      {
+        id: "koln_dus",
+        label: "🇩🇪 Köln / Düsseldorf / Ruhr Bölgesi",
+        airports: [
+          { code: "CGN", name: "Köln / Bonn", dist: "15 km", cost_eur: 4, duration_min: 15, checked: true },
+          { code: "DUS", name: "Düsseldorf", dist: "45 km", cost_eur: 12, duration_min: 35, checked: true },
+          { code: "DTM", name: "Dortmund", dist: "85 km", cost_eur: 16, duration_min: 75, checked: true },
+          { code: "FRA", name: "Frankfurt Main", dist: "170 km", cost_eur: 29, duration_min: 65, checked: false },
+          { code: "EIN", name: "Eindhoven", dist: "140 km", cost_eur: 22, duration_min: 130, checked: false }
+        ]
+      },
+      {
+        id: "bruksel_brugge",
+        label: "🇧🇪 Brüksel / Brugge / Gent / Anvers",
+        airports: [
+          { code: "BRU", name: "Brüksel Zaventem", dist: "12 km", cost_eur: 10, duration_min: 20, checked: true },
+          { code: "CRL", name: "Brüksel Charleroi", dist: "55 km", cost_eur: 17, duration_min: 55, checked: true },
+          { code: "EIN", name: "Eindhoven", dist: "115 km", cost_eur: 22, duration_min: 110, checked: true },
+          { code: "AMS", name: "Amsterdam Schiphol", dist: "190 km", cost_eur: 28, duration_min: 115, checked: false },
+          { code: "DUS", name: "Düsseldorf", dist: "200 km", cost_eur: 27, duration_min: 140, checked: false }
+        ]
+      },
+      {
+        id: "milano",
+        label: "🇮🇹 Milano / Como / Kuzey İtalya",
+        airports: [
+          { code: "BGY", name: "Milano Bergamo", dist: "50 km", cost_eur: 10, duration_min: 50, checked: true },
+          { code: "MXP", name: "Milano Malpensa", dist: "48 km", cost_eur: 13, duration_min: 50, checked: true },
+          { code: "BLQ", name: "Bologna", dist: "210 km", cost_eur: 22, duration_min: 70, checked: true },
+          { code: "VRN", name: "Verona", dist: "155 km", cost_eur: 18, duration_min: 80, checked: false },
+          { code: "VCE", name: "Venedik Marco Polo", dist: "265 km", cost_eur: 25, duration_min: 145, checked: false }
+        ]
+      },
+      {
+        id: "viyana_budapeste",
+        label: "🇦🇹 Viyana / Bratislava / Budapeşte",
+        airports: [
+          { code: "VIE", name: "Viyana Schwechat", dist: "18 km", cost_eur: 5, duration_min: 20, checked: true },
+          { code: "BTS", name: "Bratislava", dist: "65 km", cost_eur: 10, duration_min: 60, checked: true },
+          { code: "BUD", name: "Budapeşte", dist: "240 km", cost_eur: 22, duration_min: 155, checked: true },
+          { code: "PRG", name: "Prag", dist: "330 km", cost_eur: 25, duration_min: 240, checked: false }
+        ]
+      }
+    ];
+
+    let currentAirportsState = [];
+    let lastResponse = null;
+    let cachedQueriesList = [];
+    let cachedQueriesMap = new Map();
+    let excludedAirlinesSet = new Set();
+    let knownAirlinesList = [];
+    let combineRequestSeq = 0;
+    let isWatchingProgress = false;
+
+    function showAlert(msg, level = "error") {
+      const box = document.getElementById("statusAlertBox");
+      if (!msg) {
+        box.style.display = "none";
+        box.innerHTML = "";
+        return;
+      }
+      box.className = `alert-box ${level}`;
+      box.style.display = "flex";
+      box.innerHTML = `<span>${msg}</span><button type="button" onclick="showAlert('')" style="background:transparent;border:none;color:inherit;cursor:pointer;font-weight:700;">✕</button>`;
+    }
+
+    function initCityDropdown() {
+      const sel = document.getElementById("targetCity");
+      sel.innerHTML = CITY_PRESETS.map(
+        (c, idx) => `<option value="${c.id}" ${idx === 0 ? "selected" : ""}>${c.label}</option>`
+      ).join("");
+      onCityChange();
+    }
+
+    function onCityChange() {
+      const cityId = document.getElementById("targetCity").value;
+      const cityObj = CITY_PRESETS.find(c => c.id === cityId) || CITY_PRESETS[0];
+      const home = document.getElementById("homeAirport").value.trim().toUpperCase();
+      let count = 0;
+      currentAirportsState = cityObj.airports
+        .filter(a => a.code !== home)
+        .map(a => {
+          const shouldCheck = Boolean(a.checked && count < MAX_TARGET_AIRPORTS);
+          if (shouldCheck) count++;
+          return { ...a, checked: shouldCheck };
+        });
+      renderAirportChecklist();
+      renderTransferInputs();
+      updateQuerySummary();
+      recombine();
+    }
+
+    function renderAirportChecklist() {
+      const home = document.getElementById("homeAirport").value.trim().toUpperCase();
+      currentAirportsState.forEach(a => {
+        if (a.code === home) a.checked = false;
+      });
+
+      const box = document.getElementById("airportChecklist");
+      box.innerHTML = currentAirportsState
+        .filter(a => a.code !== home)
+        .map((a, idx) => `
+          <label class="airport-item ${a.checked ? "checked" : ""}">
+            <div class="airport-left">
+              <input type="checkbox" ${a.checked ? "checked" : ""} onchange="toggleAirportCode('${a.code}', this.checked, this)" />
+              <span class="airport-code">${a.code}</span>
+              <span class="airport-name">${a.name}</span>
+            </div>
+            <span class="airport-meta">${a.dist} · ~${a.duration_min} dk · ~${a.cost_eur}€ (tahmini)</span>
+          </label>
+        `)
+        .join("");
+
+      const checkedCount = getTargetAirports().length;
+      document.getElementById("selectedAirportCount").textContent = `${checkedCount} / ${MAX_TARGET_AIRPORTS} seçili`;
+    }
+
+    function toggleAirportCode(code, isChecked, checkboxEl) {
+      const item = currentAirportsState.find(a => a.code === code);
+      if (!item) return;
+
+      if (isChecked) {
+        const currentChecked = getTargetAirports().length;
+        if (currentChecked >= MAX_TARGET_AIRPORTS) {
+          if (checkboxEl) checkboxEl.checked = false;
+          showAlert(`En fazla ${MAX_TARGET_AIRPORTS} hedef havalimanı seçebilirsiniz.`, "warn");
+          return;
+        }
+      }
+      item.checked = isChecked;
+      renderAirportChecklist();
+      renderTransferInputs();
+      updateQuerySummary();
+      recombine();
+    }
+
+    function addCustomAirport() {
+      const inp = document.getElementById("customAirportInput");
+      const code = inp.value.trim().toUpperCase();
+      const home = document.getElementById("homeAirport").value.trim().toUpperCase();
+      if (!/^[A-Z]{3}$/.test(code)) {
+        showAlert("Lütfen 3 harfli geçerli bir IATA havalimanı kodu girin (Örn: LUX).", "warn");
+        return;
+      }
+      if (code === home) {
+        showAlert("Kalkış havalimanı hedef listesine eklenemez.", "warn");
+        return;
+      }
+      const existing = currentAirportsState.find(a => a.code === code);
+      const canCheck = getTargetAirports().length < MAX_TARGET_AIRPORTS;
+      if (existing) {
+        if (!existing.checked && !canCheck) {
+          showAlert(`En fazla ${MAX_TARGET_AIRPORTS} hedef havalimanı seçilebilir.`, "warn");
+        } else {
+          existing.checked = true;
+        }
+      } else {
+        currentAirportsState.push({
+          code,
+          name: "Özel Havalimanı",
+          dist: "-",
+          cost_eur: 20,
+          duration_min: 90,
+          checked: canCheck
+        });
+        if (!canCheck) {
+          showAlert(`${code} listeye eklendi ancak en fazla ${MAX_TARGET_AIRPORTS} havalimanı seçili olabilir.`, "warn");
+        }
+      }
+      inp.value = "";
+      renderAirportChecklist();
+      renderTransferInputs();
+      updateQuerySummary();
+      recombine();
+    }
+
+    async function fetchCachedQueries() {
+      try {
+        const res = await fetch("/api/cache?t=" + Date.now(), { cache: "no-store" });
+        if (!res.ok) return;
+        const data = await res.json();
+        updateCachedQueriesUI(data.cached_queries || [], data.cache_error);
+      } catch (e) {}
+    }
+
+    function updateCachedQueriesUI(list, cacheErr = null) {
+      cachedQueriesList = list || [];
+      cachedQueriesMap = new Map(cachedQueriesList.map(x => [x.key, x]));
+      document.getElementById("cacheCountBadge").textContent = cachedQueriesList.length;
+
+      if (cacheErr) {
+        showAlert(cacheErr, "error");
+      }
+
+      const box = document.getElementById("cachedQueriesBox");
+      if (cachedQueriesList.length === 0) {
+        box.innerHTML = "Henüz bugün taranmış sorgu yok.";
+      } else {
+        box.innerHTML = cachedQueriesList
+          .map(q => {
+            let statusBadge = "";
+            if (q.status === "success") {
+              statusBadge = `<span style="color:#10b981">${q.flight_count} uçuş (limit:${q.requested_limit})</span>`;
+            } else if (q.status === "no_results") {
+              statusBadge = `<span style="color:#94a3b8">Uçuş yok (doğrulandı)</span>`;
+            } else {
+              statusBadge = `<span style="color:#ef4444">Hata: ${q.status}</span>`;
+            }
+            return `<div style="display:flex; justify-content:space-between; border-bottom:1px solid rgba(255,255,255,0.05); padding:3px 0;">
+              <span><b>${q.origin}→${q.destination}</b> (${q.date}) [${q.currency}]</span>
+              ${statusBadge}
+            </div>`;
+          })
+          .join("");
+      }
+      updateQuerySummary();
+    }
+
+    async function clearTodayCache() {
+      if (!confirm("Bugün taranmış tüm tarih kayıtlarını silmek istediğinize emin misiniz?")) return;
+      try {
+        const res = await fetch("/api/cache/clear", { method: "POST" });
+        const data = await res.json();
+        if (!res.ok) {
+          showAlert(data.error || "Önbellek temizlenemedi.", "error");
+          return;
+        }
+        updateCachedQueriesUI(data.cached_queries || [], data.cache_error);
+        await recombine();
+      } catch (e) {
+        showAlert("Önbellek temizleme sırasında bağlantı hatası: " + e, "error");
+      }
+    }
+
+    function formatDateInput(dt) {
+      return dt.toISOString().split("T")[0];
+    }
+
+    function addDays(dateStr, days) {
+      const dt = new Date(dateStr + "T00:00:00");
+      dt.setDate(dt.getDate() + days);
+      const y = dt.getFullYear();
+      const m = String(dt.getMonth() + 1).padStart(2, "0");
+      const d = String(dt.getDate()).padStart(2, "0");
+      return `${y}-${m}-${d}`;
+    }
+
+    function computeEffectiveRanges() {
+      const winStart = document.getElementById("windowStart").value;
+      const winEnd = document.getElementById("windowEnd").value;
+      const minStay = Math.max(1, parseInt(document.getElementById("minStay").value || "4", 10));
+
+      const outStart = winStart;
+      const outEnd = addDays(winEnd, -minStay);
+      const inStart = addDays(winStart, minStay);
+      const inEnd = winEnd;
+
+      return { winStart, winEnd, outStart, outEnd, inStart, inEnd, minStay };
+    }
+
+    function initDates() {
+      const now = new Date();
+      const start = new Date(now);
+      start.setDate(now.getDate() + 10);
+      const end = new Date(start);
+      end.setDate(start.getDate() + 14);
+
+      document.getElementById("windowStart").value = formatDateInput(start);
+      document.getElementById("windowEnd").value = formatDateInput(end);
+
+      initCityDropdown();
+      fetchCachedQueries();
+      recombine();
+      checkAndResumeActiveScrape();
+    }
+
+    function getTargetAirports() {
+      const home = document.getElementById("homeAirport").value.trim().toUpperCase();
+      return currentAirportsState
+        .filter(a => a.checked && a.code !== home)
+        .map(a => a.code)
+        .slice(0, MAX_TARGET_AIRPORTS);
+    }
+
+    function countDays(startStr, endStr) {
+      if (!startStr || !endStr) return 0;
+      const s = new Date(startStr + "T00:00:00");
+      const e = new Date(endStr + "T00:00:00");
+      const diff = Math.round((e - s) / (1000 * 60 * 60 * 24)) + 1;
+      return diff > 0 ? diff : 0;
+    }
+
+    function getDatesBetween(startStr, endStr) {
+      const count = countDays(startStr, endStr);
+      const res = [];
+      for (let i = 0; i < count; i++) {
+        res.push(addDays(startStr, i));
+      }
+      return res;
+    }
+
+    function isEntryUsableOnClient(entry, reqLimit) {
+      if (!entry || !entry.usable) return false;
+      if (entry.status === "no_results") return true;
+      if (entry.status !== "success") return false;
+      return reqLimit <= (entry.requested_limit || 0) || reqLimit <= (entry.collected_count || 0);
+    }
+
+    function updateQuerySummary() {
+      const home = document.getElementById("homeAirport").value.trim().toUpperCase();
+      const targets = getTargetAirports();
+      const curr = document.getElementById("currency").value.trim().toUpperCase();
+      const reqLimit = parseInt(document.getElementById("maxResults").value || "10", 10);
+      const { winStart, winEnd, outStart, outEnd, inStart, inEnd, minStay } = computeEffectiveRanges();
+      const maxStay = parseInt(document.getElementById("maxStay").value || "6", 10);
+
+      const windowDays = countDays(winStart, winEnd);
+      const outDays = countDays(outStart, outEnd);
+      const inDays = countDays(inStart, inEnd);
+      const outQueries = targets.length * outDays;
+      const inQueries = targets.length * inDays;
+      const total = outQueries + inQueries;
+
+      if (targets.length === 0) {
+        document.getElementById("querySummary").innerHTML =
+          `<b style="color:#fca5a5">Uyarı:</b> Lütfen listeden en az 1 (en fazla 3) hedef havalimanı işaretleyin.`;
+        return;
+      }
+
+      if (minStay > maxStay) {
+        document.getElementById("querySummary").innerHTML =
+          `<b style="color:#fca5a5">Uyarı:</b> Min. gece (${minStay}), Maks. geceden (${maxStay}) büyük olamaz.`;
+        return;
+      }
+
+      if (outDays <= 0 || inDays <= 0) {
+        document.getElementById("querySummary").innerHTML =
+          `<b style="color:#fca5a5">Uyarı:</b> Seçilen tarih aralığı (${windowDays} gün), minimum kalış süresinden (${minStay} gece) daha kısa!`;
+        return;
+      }
+
+      const outDateList = getDatesBetween(outStart, outEnd);
+      const inDateList = getDatesBetween(inStart, inEnd);
+      let cachedHitCount = 0;
+      let failedOrScopeCount = 0;
+
+      targets.forEach(t => {
+        outDateList.forEach(d => {
+          const entry = cachedQueriesMap.get(`${home}_${t}_${d}_${curr}`);
+          if (isEntryUsableOnClient(entry, reqLimit)) cachedHitCount++;
+          else if (entry) failedOrScopeCount++;
+        });
+        inDateList.forEach(d => {
+          const entry = cachedQueriesMap.get(`${t}_${home}_${d}_${curr}`);
+          if (isEntryUsableOnClient(entry, reqLimit)) cachedHitCount++;
+          else if (entry) failedOrScopeCount++;
+        });
+      });
+
+      const newScrapeCount = Math.max(0, total - cachedHitCount);
+
+      document.getElementById("querySummary").innerHTML =
+        `<b>${windowDays} Günlük Pencere (${minStay}–${maxStay} Gece Kalış):</b><br>` +
+        `• Hedefler (${targets.length}/${MAX_TARGET_AIRPORTS}): <b>${targets.join(", ")}</b><br>` +
+        `• Gidiş (${outStart} .. ${outEnd}): <b>${outQueries}</b> sorgu<br>` +
+        `• Dönüş (${inStart} .. ${inEnd}): <b>${inQueries}</b> sorgu<br>` +
+        `• ⚡ Önbellekten hazır: <b style="color:#34d399">${cachedHitCount}</b> sorgu<br>` +
+        (failedOrScopeCount > 0
+          ? `• 🔄 Yeniden taranacak (hatalı/düşük limitli): <b style="color:#f87171">${failedOrScopeCount}</b> sorgu<br>`
+          : "") +
+        `• 🔍 Toplam çekilecek: <b style="color:#fbbf24">${newScrapeCount}</b> sorgu`;
+    }
+
+    function renderTransferInputs() {
+      const checkedObjs = currentAirportsState.filter(a => a.checked);
+      const curr = document.getElementById("currency").value;
+      const rate = parseFloat(document.getElementById("manualEurRate").value || "1.0") || 1.0;
+      const container = document.getElementById("transferInputs");
+      container.innerHTML = "";
+
+      document.getElementById("rateInfoLabel").textContent =
+        `Kullanılan manuel kur çarpanı: 1 EUR = ${rate} ${curr} (Tahmini değerler düzenlenebilir)`;
+
+      checkedObjs.forEach(a => {
+        const row = document.createElement("div");
+        row.className = "transfer-row";
+        const estCost = Math.round((a.cost_eur || 20) * rate * 100) / 100;
+        row.innerHTML = `
+          <span>${a.code}</span>
+          <input type="number" id="tr_cost_${a.code}" value="${estCost}" min="0" step="1" onchange="recombine()" />
+          <input type="number" id="tr_dur_${a.code}" value="${a.duration_min || 90}" min="0" step="5" onchange="recombine()" />
+        `;
+        container.appendChild(row);
+      });
+    }
+
+    function applyManualRateToTransfers() {
+      renderTransferInputs();
+      recombine();
+    }
+
+    function setQuickTime(outMin, outMax, inMin, inMax) {
+      document.getElementById("outDepMin").value = outMin;
+      document.getElementById("outDepMax").value = outMax;
+      document.getElementById("inDepMin").value = inMin;
+      document.getElementById("inDepMax").value = inMax;
+      recombine();
+    }
+
+    function toggleBaggageFeeInputs() {
+      const mode = document.getElementById("baggageMode").value;
+      const box = document.getElementById("baggageFeeBox");
+      box.style.display = mode === "add_cabin_bag" || mode === "add_checked_bag" ? "grid" : "none";
+    }
+
+    function renderAirlineFilters(airlines) {
+      const box = document.getElementById("airlineFilterBox");
+      if (!airlines || airlines.length === 0) {
+        knownAirlinesList = [];
+        box.innerHTML = "Bu arama için doğrulanmış havayolu bulunmuyor.";
+        return;
+      }
+      knownAirlinesList = airlines;
+      box.innerHTML = knownAirlinesList
+        .map(name => {
+          const isChecked = !excludedAirlinesSet.has(name);
+          const safeName = name.replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+          return `
+            <label style="display:flex; align-items:center; gap:7px; padding:2px 0; cursor:pointer; color:#e2e8f0;">
+              <input type="checkbox" ${isChecked ? "checked" : ""} onchange="toggleAirlineFilter('${safeName}', this.checked)" />
+              <span>${name}</span>
+            </label>
+          `;
+        })
+        .join("");
+    }
+
+    function toggleAirlineFilter(name, isChecked) {
+      if (isChecked) {
+        excludedAirlinesSet.delete(name);
+      } else {
+        excludedAirlinesSet.add(name);
+      }
+      recombine();
+    }
+
+    function toggleTransferBox() {
+      const show = document.getElementById("includeTransfer").checked;
+      document.getElementById("transferBox").style.display = show ? "flex" : "none";
+    }
+
+    ["homeAirport", "windowStart", "windowEnd", "currency", "maxResults"].forEach(id => {
+      document.getElementById(id).addEventListener("change", () => {
+        if (id === "homeAirport") {
+          renderAirportChecklist();
+          renderTransferInputs();
+        }
+        updateQuerySummary();
+        recombine();
+      });
+    });
+
+    function buildPayload(reqId = null) {
+      const targets = getTargetAirports();
+      const { winStart, winEnd, outStart, outEnd, inStart, inEnd } = computeEffectiveRanges();
+      const transfer_costs = {};
+      const transfer_durations = {};
+
+      targets.forEach(code => {
+        const cEl = document.getElementById(`tr_cost_${code}`);
+        const dEl = document.getElementById(`tr_dur_${code}`);
+        if (cEl && cEl.value.trim() !== "") {
+          transfer_costs[code] = parseFloat(cEl.value);
+        }
+        if (dEl && dEl.value.trim() !== "") {
+          transfer_durations[code] = parseInt(dEl.value, 10);
+        }
+      });
+
+      return {
+        client_request_id: reqId,
+        home_airport: document.getElementById("homeAirport").value.trim().toUpperCase(),
+        target_airports: targets,
+        window_start: winStart,
+        window_end: winEnd,
+        outbound_start_date: outStart,
+        outbound_end_date: outEnd,
+        inbound_start_date: inStart,
+        inbound_end_date: inEnd,
+        currency: document.getElementById("currency").value,
+        max_results_per_route: parseInt(document.getElementById("maxResults").value || "10", 10),
+        min_stay_days: parseInt(document.getElementById("minStay").value || "4", 10),
+        max_stay_days: parseInt(document.getElementById("maxStay").value || "6", 10),
+        max_stops: document.getElementById("maxStops").value,
+        max_flight_hours: document.getElementById("maxFlightHours").value,
+        out_dep_min_time: document.getElementById("outDepMin").value || "00:00",
+        out_dep_max_time: document.getElementById("outDepMax").value || "23:59",
+        in_dep_min_time: document.getElementById("inDepMin").value || "00:00",
+        in_dep_max_time: document.getElementById("inDepMax").value || "23:59",
+        baggage_mode: document.getElementById("baggageMode").value || "none",
+        cabin_bag_fee: parseFloat(document.getElementById("cabinBagFee").value || "0"),
+        checked_bag_fee: parseFloat(document.getElementById("checkedBagFee").value || "0"),
+        excluded_airlines: Array.from(excludedAirlinesSet),
+        only_asymmetric: document.getElementById("onlyAsymmetric").checked,
+        include_transfer: document.getElementById("includeTransfer").checked,
+        transfer_costs,
+        transfer_durations
+      };
+    }
+
+    async function stopActiveScrape() {
+      const stopBtn = document.getElementById("stopScrapeBtn");
+      stopBtn.disabled = true;
+      try {
+        const res = await fetch("/api/scrape/stop", { method: "POST" });
+        if (!res.ok) {
+          showAlert("Durdurma isteği gönderilemedi.", "warn");
+        }
+      } catch (e) {
+        showAlert("Durdurma isteği hatası: " + e, "error");
+      } finally {
+        stopBtn.disabled = false;
+      }
+    }
+
+    async function watchActiveScrapeLoop() {
+      if (isWatchingProgress) return;
+      isWatchingProgress = true;
+
+      const btn = document.getElementById("scrapeBtn");
+      const pBox = document.getElementById("progressBox");
+      btn.disabled = true;
+      btn.textContent = "⏳ Google Flights Taranıyor...";
+      pBox.style.display = "flex";
+
+      let lastDone = -1;
+      let consecutiveFailures = 0;
+      const MAX_POLL_FAILURES = 5;
+
+      try {
+        while (true) {
+          await new Promise(r => setTimeout(r, 850));
+          let st = null;
+          try {
+            const pRes = await fetch("/api/progress?t=" + Date.now(), { cache: "no-store" });
+            if (!pRes.ok) {
+              throw new Error(`HTTP ${pRes.status}`);
+            }
+            st = await pRes.json();
+            consecutiveFailures = 0;
+          } catch (pollErr) {
+            consecutiveFailures++;
+            if (consecutiveFailures >= MAX_POLL_FAILURES) {
+              showAlert(
+                `İlerleme durumu sunucudan alınamadı (${MAX_POLL_FAILURES} başarısız deneme). Lütfen sunucunun çalıştığını kontrol edin.`,
+                "error"
+              );
+              break;
+            }
+            continue;
+          }
+
+          const pct = st.total > 0 ? Math.round((st.done / st.total) * 100) : 0;
+          document.getElementById("progressLabel").textContent = st.label || "Taranıyor...";
+          document.getElementById("progressCount").textContent = `${st.done} / ${st.total}`;
+          document.getElementById("progressFill").style.width = `${pct}%`;
+
+          document.getElementById("pStatSuccess").textContent = st.success ?? 0;
+          document.getElementById("pStatNoRes").textContent = st.no_results ?? 0;
+          document.getElementById("pStatFailed").textContent = st.failed ?? 0;
+          document.getElementById("pStatCache").textContent = st.from_cache ?? 0;
+
+          if (st.cache_error) {
+            showAlert(st.cache_error, "error");
+          }
+
+          if (st.done > lastDone && st.done % 2 === 0) {
+            lastDone = st.done;
+            await recombine();
+          }
+
+          if (!st.running) {
+            if (st.state === "error" || st.error) {
+              showAlert("Tarama hatası: " + (st.error || st.label), "error");
+            } else if (st.state === "partial" || (st.failed && st.failed > 0)) {
+              const blockNote = st.blocked > 0 ? ` (${st.blocked} sorguda CAPTCHA/erişim engeli algılandı!)` : "";
+              showAlert(
+                `⚠️ ${st.label}${blockNote}. Tekrar 'Uçuşları Tara' butonuna basarak yalnızca hatalı/eksik sorguları yeniden deneyebilirsiniz.`,
+                "warn"
+              );
+            } else if (st.state === "stopped") {
+              showAlert(
+                `⏹️ ${st.label}. Başarılı sorgular önbelleğe kaydedildi; tekrar başlatarak kaldığınız yerden devam edebilirsiniz.`,
+                "warn"
+              );
+            } else {
+              showAlert(`✅ ${st.label}`, "info");
+            }
+            break;
+          }
+        }
+        await fetchCachedQueries();
+        await recombine();
+      } finally {
+        isWatchingProgress = false;
+        btn.disabled = false;
+        btn.textContent = "🚀 Uçuşları Tara & Kombinasyon Bul";
+        pBox.style.display = "none";
+      }
+    }
+
+    async function checkAndResumeActiveScrape() {
+      try {
+        const pRes = await fetch("/api/progress?t=" + Date.now(), { cache: "no-store" });
+        if (!pRes.ok) return;
+        const st = await pRes.json();
+        if (st && st.running) {
+          watchActiveScrapeLoop();
+        }
+      } catch (e) {}
+    }
+
+    async function startScrape() {
+      showAlert("");
+      const btn = document.getElementById("scrapeBtn");
+      const pBox = document.getElementById("progressBox");
+      btn.disabled = true;
+      btn.textContent = "⏳ Başlatılıyor...";
+
+      try {
+        const startRes = await fetch("/api/scrape", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(buildPayload())
+        });
+        const startData = await startRes.json();
+        if (!startRes.ok || startData.error) {
+          showAlert("Hata: " + (startData.error || `HTTP ${startRes.status}`), "error");
+          btn.disabled = false;
+          btn.textContent = "🚀 Uçuşları Tara & Kombinasyon Bul";
+          pBox.style.display = "none";
+          return;
+        }
+        await watchActiveScrapeLoop();
+      } catch (err) {
+        showAlert("Sunucu bağlantı hatası: " + err, "error");
+        btn.disabled = false;
+        btn.textContent = "🚀 Uçuşları Tara & Kombinasyon Bul";
+        pBox.style.display = "none";
+      }
+    }
+
+    async function recombine() {
+      const reqId = ++combineRequestSeq;
+      const payload = buildPayload(reqId);
+      if (!payload.target_airports || payload.target_airports.length === 0) {
+        renderEmptyNoData("Lütfen en az 1 hedef havalimanı seçin.");
+        return;
+      }
+
+      try {
+        const res = await fetch("/api/combine", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        // Eski bir asenkron isteğin yanıtı yeni ekranı ezmesin
+        if (reqId !== combineRequestSeq) return;
+
+        if (!res.ok || data.error) {
+          showAlert(data.error || `İstek hatası (HTTP ${res.status})`, "error");
+          renderEmptyNoData(data.error || "Geçersiz arama parametreleri.");
+          return;
+        }
+
+        lastResponse = data;
+        renderResults(data);
+      } catch (e) {
+        if (reqId === combineRequestSeq) {
+          showAlert("Kombinasyon hesaplanırken sunucuya ulaşılamadı: " + e, "error");
+        }
+      }
+    }
+
+    function renderEmptyNoData(msg) {
+      document.getElementById("mOutCount").textContent = "0";
+      document.getElementById("mInCount").textContent = "0";
+      document.getElementById("mComboCount").textContent = "0";
+      document.getElementById("mBestPrice").textContent = "-";
+      document.getElementById("viewCards").innerHTML = `<div class="empty-state">${msg}</div>`;
+      document.getElementById("viewTable").innerHTML = `<div class="empty-state">${msg}</div>`;
+      document.getElementById("viewRaw").innerHTML = `<div class="empty-state">${msg}</div>`;
+    }
+
+    function fmtMoney(val, curr) {
+      if (val === null || val === undefined || Number.isNaN(Number(val))) return "Doğrulanmadı";
+      return Number(val).toLocaleString("tr-TR", { maximumFractionDigits: 0 }) + " " + curr;
+    }
+
+    function fmtField(val) {
+      if (val === null || val === undefined || String(val).trim() === "") {
+        return `<span style="color:#f59e0b">Doğrulanmadı</span>`;
+      }
+      return String(val);
+    }
+
+    function fmtArrivalDateBadge(depDate, arrDate, offset) {
+      if (!arrDate) return `<span style="color:#f59e0b">Varış tarihi doğrulanmadı</span>`;
+      if (offset && offset > 0) {
+        return `<span style="color:#fbbf24; font-weight:600;">(+${offset} gün → Varış: ${arrDate})</span>`;
+      }
+      return `<span style="color:var(--muted)">(Varış: ${arrDate})</span>`;
+    }
+
+    async function recheckComboPrice(idx) {
+      if (!lastResponse || !lastResponse.combinations || !lastResponse.combinations[idx]) return;
+      const c = lastResponse.combinations[idx];
+      const box = document.getElementById(`recheck_box_${idx}`);
+      const btn = document.getElementById(`recheck_btn_${idx}`);
+      if (!box || !btn) return;
+
+      btn.disabled = true;
+      btn.textContent = "⏳ Kontrol ediliyor...";
+      box.style.display = "block";
+      box.innerHTML = "Seçili gidiş ve dönüş rotaları önbellek atlanarak canlı kontrol ediliyor...";
+
+      const payload = {
+        currency: lastResponse.currency || "TRY",
+        max_results_per_route: Math.max(20, parseInt(document.getElementById("maxResults").value || "10", 10)),
+        outbound: {
+          origin: c.out_origin,
+          destination: c.out_destination,
+          date: c.out_date,
+          airline: c.out_airline,
+          departure_time: c.out_departure_time,
+          arrival_time: c.out_arrival_time,
+          stops: c.out_stops,
+          price: c.out_price,
+          flight_number: c.out_flight_number
+        },
+        inbound: {
+          origin: c.in_origin,
+          destination: c.in_destination,
+          date: c.in_date,
+          airline: c.in_airline,
+          departure_time: c.in_departure_time,
+          arrival_time: c.in_arrival_time,
+          stops: c.in_stops,
+          price: c.in_price,
+          flight_number: c.in_flight_number
+        }
+      };
+
+      try {
+        const res = await fetch("/api/recheck", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (!res.ok || data.error) {
+          box.innerHTML = `<span style="color:#f87171">❌ Doğrulama hatası: ${data.error || res.status}</span>`;
+          return;
+        }
+
+        const curr = data.currency || "TRY";
+        if (data.overall_status === "matched_unchanged") {
+          box.innerHTML = `<span style="color:#34d399">✅ <b>Fiyat Doğrulandı (Değişmedi):</b> Gidiş (${fmtMoney(data.outbound.new_price, curr)}) + Dönüş (${fmtMoney(data.inbound.new_price, curr)}) = <b>${fmtMoney(data.new_flight_total, curr)}</b></span>`;
+        } else if (data.overall_status === "matched_price_changed") {
+          const sign = data.total_price_diff > 0 ? "+" : "";
+          box.innerHTML = `<span style="color:#fbbf24">⚠️ <b>Fiyat Değişti:</b> Eski Uçuş Toplamı: ${fmtMoney(data.old_flight_total, curr)} → Yeni: <b>${fmtMoney(data.new_flight_total, curr)}</b> (${sign}${fmtMoney(data.total_price_diff, curr)})</span>`;
+        } else if (data.overall_status === "flight_not_found") {
+          const outMsg = data.outbound.status === "flight_not_found" ? "Gidiş uçuşu bulunamadı" : `Gidiş: ${fmtMoney(data.outbound.new_price, curr)}`;
+          const inMsg = data.inbound.status === "flight_not_found" ? "Dönüş uçuşu bulunamadı" : `Dönüş: ${fmtMoney(data.inbound.new_price, curr)}`;
+          box.innerHTML = `<span style="color:#f87171">❌ <b>Seçili Uçuş Güncel Sonuçlarda Bulunamadı:</b> ${outMsg} | ${inMsg} (Başka uçuşun fiyatı atanmadı).</span>`;
+        } else {
+          box.innerHTML = `<span style="color:#f87171">⚠️ <b>Tarama Hatası:</b> Gidiş (${data.outbound.query_status}) / Dönüş (${data.inbound.query_status})</span>`;
+        }
+        await fetchCachedQueries();
+      } catch (err) {
+        box.innerHTML = `<span style="color:#f87171">❌ Bağlantı hatası: ${err}</span>`;
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "🔄 Fiyatı Yeniden Kontrol Et";
+      }
+    }
+
+    function renderResults(data) {
+      if (data.cached_queries) {
+        updateCachedQueriesUI(data.cached_queries, data.cache_error);
+      }
+      renderAirlineFilters(data.available_airlines || []);
+
+      const curr = data.currency || "TRY";
+      document.getElementById("mOutCount").textContent = data.outbound_count || 0;
+      document.getElementById("mInCount").textContent = data.inbound_count || 0;
+      document.getElementById("mComboCount").textContent = data.combinations_count || 0;
+
+      if (!data.has_data) {
+        document.getElementById("mBestPrice").textContent = "-";
+        const msg =
+          data.message ||
+          "Bu arama (rota, tarih aralığı ve para birimi) için henüz doğrulanmış veri yok. Sol menüden 'Uçuşları Tara' butonuna tıklayın.";
+        document.getElementById("viewCards").innerHTML = `<div class="empty-state">${msg}</div>`;
+        document.getElementById("viewTable").innerHTML = `<div class="empty-state">${msg}</div>`;
+        document.getElementById("viewRaw").innerHTML = `<div class="empty-state">${msg}</div>`;
+        return;
+      }
+
+      const combos = data.combinations || [];
+      document.getElementById("mBestPrice").textContent =
+        combos.length > 0 ? fmtMoney(combos[0].grand_total_price, curr) : "-";
+
+      // 1) Kart Görünümü (En İyi 25)
+      const cardsEl = document.getElementById("viewCards");
+      if (combos.length === 0) {
+        cardsEl.innerHTML = `<div class="empty-state">Bu arama için tek yön uçuşlar mevcut ancak seçilen kalış gecesi, pencere sonu varış tarihi, aktarma, saat veya bagaj filtrelerine uygun kombinasyon bulunamadı.</div>`;
+      } else {
+        cardsEl.innerHTML = combos.slice(0, 25).map((c, idx) => {
+          const badge = c.is_asymmetric
+            ? `<span class="badge asym">🔀 Asimetrik Rota</span>`
+            : `<span class="badge sym">🔁 Simetrik Rota</span>`;
+
+          const breakdownParts = [`2 Bağımsız Tek Yön Uçuş: ${fmtMoney(c.flight_total_price, curr)}`];
+          if (c.baggage_total_price > 0) {
+            breakdownParts.push(`Tahmini Bagaj (Manuel): +${fmtMoney(c.baggage_total_price, curr)}`);
+          }
+          if (c.transfer_total_price > 0) {
+            breakdownParts.push(`Tahmini Transfer: +${fmtMoney(c.transfer_total_price, curr)}`);
+          }
+          const trSub = `<div class="sub">${breakdownParts.join(" · ")}</div>`;
+
+          const outExtra = [];
+          if (c.out_flight_number) outExtra.push(`Uçuş No: ${c.out_flight_number}`);
+          if (c.out_layover_airports && c.out_layover_airports.length) outExtra.push(`Aktarma: ${c.out_layover_airports.join(", ")}`);
+          if (c.out_self_transfer) outExtra.push(`⚠️ Self-Transfer`);
+
+          const inExtra = [];
+          if (c.in_flight_number) inExtra.push(`Uçuş No: ${c.in_flight_number}`);
+          if (c.in_layover_airports && c.in_layover_airports.length) inExtra.push(`Aktarma: ${c.in_layover_airports.join(", ")}`);
+          if (c.in_self_transfer) inExtra.push(`⚠️ Self-Transfer`);
+
+          return `
+            <div class="combo-card">
+              <div class="combo-header">
+                <div class="combo-title">
+                  <span>#${idx + 1} | ${c.route_summary} (${c.stay_days} Gece Hedefte Kalış)</span>
+                  ${badge}
+                </div>
+                <div class="combo-price">
+                  <div class="total">${fmtMoney(c.grand_total_price, curr)}</div>
+                  ${trSub}
+                </div>
+              </div>
+              <div class="legs-grid">
+                <div class="leg-box">
+                  <div class="leg-top">
+                    <span>🛫 Gidiş: ${c.out_origin} → ${c.out_destination}</span>
+                    <span>${fmtMoney(c.out_price, curr)}${c.out_baggage_cost > 0 ? ` (+${fmtMoney(c.out_baggage_cost, curr)} tahmini bagaj)` : ""}</span>
+                  </div>
+                  <div class="leg-meta">
+                    📅 <b>Kalkış:</b> ${c.out_date} ${fmtArrivalDateBadge(c.out_date, c.out_arrival_date, c.out_arrival_day_offset)}<br>
+                    🕒 <b>Saat:</b> ${fmtField(c.out_departure_time)} – ${fmtField(c.out_arrival_time)} (${fmtField(c.out_duration)})<br>
+                    ✈️ <b>Havayolu:</b> ${fmtField(c.out_airline)} &nbsp;|&nbsp; 🔄 <b>Aktarma:</b> ${fmtField(c.out_stops_text)}<br>
+                    ${c.out_baggage_label || "❓ Bagaj: Bilinmiyor (Doğrulanmadı)"}
+                    ${outExtra.length > 0 ? `<br><span style="color:#93c5fd">${outExtra.join(" · ")}</span>` : ""}
+                  </div>
+                  <a class="leg-link" href="${c.out_booking_url}" target="_blank" rel="noopener">
+                    Google Flights'ta Gidiş Aramasını Aç ↗
+                  </a>
+                </div>
+                <div class="leg-box">
+                  <div class="leg-top">
+                    <span>🛬 Dönüş: ${c.in_origin} → ${c.in_destination}</span>
+                    <span>${fmtMoney(c.in_price, curr)}${c.in_baggage_cost > 0 ? ` (+${fmtMoney(c.in_baggage_cost, curr)} tahmini bagaj)` : ""}</span>
+                  </div>
+                  <div class="leg-meta">
+                    📅 <b>Kalkış:</b> ${c.in_date} ${fmtArrivalDateBadge(c.in_date, c.in_arrival_date, c.in_arrival_day_offset)}<br>
+                    🕒 <b>Saat:</b> ${fmtField(c.in_departure_time)} – ${fmtField(c.in_arrival_time)} (${fmtField(c.in_duration)})<br>
+                    ✈️ <b>Havayolu:</b> ${fmtField(c.in_airline)} &nbsp;|&nbsp; 🔄 <b>Aktarma:</b> ${fmtField(c.in_stops_text)}<br>
+                    ${c.in_baggage_label || "❓ Bagaj: Bilinmiyor (Doğrulanmadı)"}
+                    ${inExtra.length > 0 ? `<br><span style="color:#93c5fd">${inExtra.join(" · ")}</span>` : ""}
+                  </div>
+                  <a class="leg-link" href="${c.in_booking_url}" target="_blank" rel="noopener">
+                    Google Flights'ta Dönüş Aramasını Aç ↗
+                  </a>
+                </div>
+              </div>
+              <div class="combo-footer">
+                <span>ℹ️ Bu seçenek bağımsız iki tek yön uçuş aramasının toplamıdır.</span>
+                <button type="button" id="recheck_btn_${idx}" class="btn-secondary" onclick="recheckComboPrice(${idx})">
+                  🔄 Fiyatı Yeniden Kontrol Et
+                </button>
+              </div>
+              <div id="recheck_box_${idx}" class="recheck-result"></div>
+            </div>
+          `;
+        }).join("");
+      }
+
+      // 2) Tablo Görünümü
+      const tableEl = document.getElementById("viewTable");
+      if (combos.length === 0) {
+        tableEl.innerHTML = `<div class="empty-state">Gösterilecek kombinasyon yok.</div>`;
+      } else {
+        tableEl.innerHTML = `
+          <table>
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Genel Toplam</th>
+                <th>Uçuş Toplamı</th>
+                <th>Tahmini Bagaj</th>
+                <th>Tahmini Transfer</th>
+                <th>Gece</th>
+                <th>Gidiş Kalkış/Varış</th>
+                <th>Gidiş Rota</th>
+                <th>G. Havayolu</th>
+                <th>G. Saat</th>
+                <th>G. Aktarma</th>
+                <th>G. Fiyat</th>
+                <th>Dönüş Kalkış/Varış</th>
+                <th>Dönüş Rota</th>
+                <th>D. Havayolu</th>
+                <th>D. Saat</th>
+                <th>D. Aktarma</th>
+                <th>D. Fiyat</th>
+                <th>Arama Bağlantıları</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${combos.map((c, i) => `
+                <tr>
+                  <td>${i + 1}</td>
+                  <td><b style="color: var(--accent)">${fmtMoney(c.grand_total_price, curr)}</b></td>
+                  <td>${fmtMoney(c.flight_total_price, curr)}</td>
+                  <td>${fmtMoney(c.baggage_total_price, curr)}</td>
+                  <td>${fmtMoney(c.transfer_total_price, curr)}</td>
+                  <td>${c.stay_days} gece</td>
+                  <td>${c.out_date} → ${c.out_arrival_date || "?"}</td>
+                  <td><b>${c.out_origin}→${c.out_destination}</b></td>
+                  <td>${fmtField(c.out_airline)}</td>
+                  <td>${fmtField(c.out_departure_time)}-${fmtField(c.out_arrival_time)}</td>
+                  <td>${fmtField(c.out_stops_text)}</td>
+                  <td>${fmtMoney(c.out_price, curr)}</td>
+                  <td>${c.in_date} → ${c.in_arrival_date || "?"}</td>
+                  <td><b>${c.in_origin}→${c.in_destination}</b></td>
+                  <td>${fmtField(c.in_airline)}</td>
+                  <td>${fmtField(c.in_departure_time)}-${fmtField(c.in_arrival_time)}</td>
+                  <td>${fmtField(c.in_stops_text)}</td>
+                  <td>${fmtMoney(c.in_price, curr)}</td>
+                  <td>
+                    <a href="${c.out_booking_url}" target="_blank" style="color:#93c5fd">Gidiş Araması↗</a> |
+                    <a href="${c.in_booking_url}" target="_blank" style="color:#93c5fd">Dönüş Araması↗</a>
+                  </td>
+                </tr>
+              `).join("")}
+            </tbody>
+          </table>
+        `;
+      }
+
+      // 3) Ham Tek Yön Uçuşlar
+      const rawFlights = [...(data.outbound_flights || []), ...(data.inbound_flights || [])];
+      const rawEl = document.getElementById("viewRaw");
+      if (rawFlights.length === 0) {
+        rawEl.innerHTML = `<div class="empty-state">Bu arama için henüz doğrulanmış tek yön uçuş yok.</div>`;
+      } else {
+        rawEl.innerHTML = `
+          <table>
+            <thead>
+              <tr>
+                <th>Rota</th>
+                <th>Kalkış Tarihi</th>
+                <th>Varış Tarihi</th>
+                <th>Havayolu</th>
+                <th>Kalkış - Varış Saati</th>
+                <th>Süre</th>
+                <th>Aktarma</th>
+                <th>Fiyat</th>
+                <th>Google Flights</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rawFlights.map(f => `
+                <tr>
+                  <td><b>${f.origin} → ${f.destination}</b></td>
+                  <td>${f.date}</td>
+                  <td>${fmtField(f.arrival_date)}</td>
+                  <td>${fmtField(f.airline)}</td>
+                  <td>${fmtField(f.departure_time)} – ${fmtField(f.arrival_time)}</td>
+                  <td>${fmtField(f.duration)}</td>
+                  <td>${fmtField(f.stops_text)}</td>
+                  <td><b>${fmtMoney(f.price, f.currency)}</b></td>
+                  <td><a href="${f.booking_url}" target="_blank" style="color:#93c5fd">Aramayı Aç ↗</a></td>
+                </tr>
+              `).join("")}
+            </tbody>
+          </table>
+        `;
+      }
+    }
+
+    function setAllAirlines(selectAll) {
+      if (selectAll) {
+        excludedAirlinesSet.clear();
+      } else {
+        knownAirlinesList.forEach(a => excludedAirlinesSet.add(a));
+      }
+      renderAirlineFilters(knownAirlinesList);
+      recombine();
+    }
+
+    function resetPostFilters() {
+      document.getElementById("maxStops").value = "";
+      document.getElementById("maxFlightHours").value = "";
+      document.getElementById("outDepMin").value = "00:00";
+      document.getElementById("outDepMax").value = "23:59";
+      document.getElementById("inDepMin").value = "00:00";
+      document.getElementById("inDepMax").value = "23:59";
+      document.getElementById("baggageMode").value = "none";
+      document.getElementById("onlyAsymmetric").checked = false;
+      document.getElementById("includeTransfer").checked = false;
+      toggleBaggageFeeInputs();
+      toggleTransferBox();
+      excludedAirlinesSet.clear();
+      renderAirlineFilters(knownAirlinesList);
+      recombine();
+    }
+
+    function switchTab(tab) {
+      document.getElementById("viewCards").style.display = tab === "cards" ? "flex" : "none";
+      document.getElementById("viewTable").style.display = tab === "table" ? "block" : "none";
+      document.getElementById("viewRaw").style.display = tab === "raw" ? "block" : "none";
+      document.getElementById("viewFilters").style.display = tab === "filters" ? "block" : "none";
+
+      document.getElementById("tabBtnCards").classList.toggle("active", tab === "cards");
+      document.getElementById("tabBtnTable").classList.toggle("active", tab === "table");
+      document.getElementById("tabBtnRaw").classList.toggle("active", tab === "raw");
+      document.getElementById("tabBtnFilters").classList.toggle("active", tab === "filters");
+    }
+
+    function downloadCSV() {
+      if (!lastResponse || !lastResponse.combinations || lastResponse.combinations.length === 0) {
+        showAlert("İndirilecek kombinasyon bulunamadı.", "warn");
+        return;
+      }
+      const rows = lastResponse.combinations;
+      const headers = [
+        "grand_total_price", "flight_total_price", "baggage_total_price", "transfer_total_price", "stay_days",
+        "out_date", "out_arrival_date", "out_origin", "out_destination", "out_airline", "out_departure_time", "out_arrival_time", "out_duration", "out_stops_text", "out_price",
+        "in_date", "in_arrival_date", "in_origin", "in_destination", "in_airline", "in_departure_time", "in_arrival_time", "in_duration", "in_stops_text", "in_price",
+        "out_booking_url", "in_booking_url"
+      ];
+      const csvContent = "\uFEFF" + [
+        headers.join(","),
+        ...rows.map(r => headers.map(h => `"${String(r[h] ?? "").replace(/"/g, '""')}"`).join(","))
+      ].join("\n");
+
+      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "ucus_kombinasyonlari.csv";
+      a.click();
+    }
+
+    initDates();
+  </script>
+</body>
+</html>
