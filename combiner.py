@@ -125,7 +125,10 @@ def build_combinations_dataframe(
     window_end: Optional[str] = None,
     expected_currency: Optional[str] = None,
     max_stops: Optional[int] = None,
+    out_max_stops: Optional[int] = None,
+    in_max_stops: Optional[int] = None,
     max_flight_hours: Optional[float] = None,
+    max_total_travel_hours: Optional[float] = None,
     out_dep_min_time: str = "00:00",
     out_dep_max_time: str = "23:59",
     in_dep_min_time: str = "00:00",
@@ -185,9 +188,13 @@ def build_combinations_dataframe(
     df_in["baggage_label"] = df_in["cabin_baggage_included"].apply(format_baggage_status)
 
     # 1) Aktarma filtresi (stops değeri None/NaN olanlar filtreyi geçemez!)
-    if max_stops is not None:
-        df_out = df_out[df_out["stops"].notna() & (df_out["stops"] <= int(max_stops))]
-        df_in = df_in[df_in["stops"].notna() & (df_in["stops"] <= int(max_stops))]
+    eff_out_stops = out_max_stops if out_max_stops is not None else max_stops
+    eff_in_stops = in_max_stops if in_max_stops is not None else max_stops
+
+    if eff_out_stops is not None:
+        df_out = df_out[df_out["stops"].notna() & (df_out["stops"] <= int(eff_out_stops))]
+    if eff_in_stops is not None:
+        df_in = df_in[df_in["stops"].notna() & (df_in["stops"] <= int(eff_in_stops))]
 
     # 2) Maksimum uçuş süresi filtresi (duration_minutes değeri None/NaN veya <=0 olanlar geçemez!)
     if max_flight_hours is not None and float(max_flight_hours) > 0:
@@ -395,6 +402,17 @@ def build_combinations_dataframe(
     else:
         combos["total_transfer_minutes"] = 0.0
         combos["total_travel_minutes"] = combos["total_flight_minutes"]
+
+    # Toplam seyahat süresi filtresi (süresi doğrulanmamış olanlar filtreyi geçemez!)
+    if max_total_travel_hours is not None and float(max_total_travel_hours) > 0:
+        max_total_mins = int(float(max_total_travel_hours) * 60)
+        combos = combos[
+            combos["total_travel_minutes"].notna()
+            & (combos["total_travel_minutes"] > 0)
+            & (combos["total_travel_minutes"] <= max_total_mins)
+        ].copy()
+        if combos.empty:
+            return pd.DataFrame()
 
     # Toplam maliyete ve ardından toplam seyahat süresine göre sırala (süresi bilinmeyenler en sona!)
     combos = combos.sort_values(

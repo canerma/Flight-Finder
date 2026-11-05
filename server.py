@@ -176,15 +176,26 @@ def validate_search_request(
     if oe_dt < os_dt or ie_dt < is_dt:
         return None, "Bitiş tarihleri başlangıç tarihlerinden önce olamaz."
 
-    max_stops_raw = body.get("max_stops", None)
-    max_stops: Optional[int] = None
-    if max_stops_raw is not None and str(max_stops_raw).strip() != "":
+    def _parse_optional_stops(val: Any, label: str) -> Tuple[Optional[int], Optional[str]]:
+        if val is None or str(val).strip() == "":
+            return None, None
         try:
-            max_stops = int(max_stops_raw)
-            if max_stops < 0 or max_stops > 3:
-                return None, "Maksimum aktarma sayısı 0 ile 3 arasında olmalıdır."
+            parsed = int(val)
+            if parsed < 0 or parsed > 3:
+                return None, f"{label} 0 ile 3 arasında olmalıdır."
+            return parsed, None
         except (ValueError, TypeError):
-            return None, "Geçersiz maksimum aktarma değeri."
+            return None, f"Geçersiz {label} değeri."
+
+    max_stops, err_s = _parse_optional_stops(body.get("max_stops", None), "Maksimum aktarma sayısı")
+    if err_s:
+        return None, err_s
+    out_max_stops, err_os = _parse_optional_stops(body.get("out_max_stops", None), "Gidiş maksimum aktarma sayısı")
+    if err_os:
+        return None, err_os
+    in_max_stops, err_is = _parse_optional_stops(body.get("in_max_stops", None), "Dönüş maksimum aktarma sayısı")
+    if err_is:
+        return None, err_is
 
     max_flight_hours_raw = body.get("max_flight_hours", None)
     max_flight_hours: Optional[float] = None
@@ -195,6 +206,16 @@ def validate_search_request(
                 return None, "Maksimum uçuş süresi pozitif bir sayı olmalıdır."
         except (ValueError, TypeError):
             return None, "Geçersiz maksimum uçuş süresi."
+
+    max_total_travel_hours_raw = body.get("max_total_travel_hours", None)
+    max_total_travel_hours: Optional[float] = None
+    if max_total_travel_hours_raw is not None and str(max_total_travel_hours_raw).strip() != "":
+        try:
+            max_total_travel_hours = float(max_total_travel_hours_raw)
+            if math.isnan(max_total_travel_hours) or math.isinf(max_total_travel_hours) or max_total_travel_hours <= 0:
+                return None, "Maksimum toplam seyahat süresi pozitif bir sayı olmalıdır."
+        except (ValueError, TypeError):
+            return None, "Geçersiz maksimum toplam seyahat süresi."
 
     try:
         cabin_bag_fee = float(body.get("cabin_bag_fee", 0.0) or 0.0)
@@ -224,7 +245,10 @@ def validate_search_request(
         "max_results_per_route": max_results_per_route,
         "max_concurrent_pages": max_concurrent_pages,
         "max_stops": max_stops,
+        "out_max_stops": out_max_stops,
+        "in_max_stops": in_max_stops,
         "max_flight_hours": max_flight_hours,
+        "max_total_travel_hours": max_total_travel_hours,
         "out_dep_min_time": str(body.get("out_dep_min_time", "00:00")).strip() or "00:00",
         "out_dep_max_time": str(body.get("out_dep_max_time", "23:59")).strip() or "23:59",
         "in_dep_min_time": str(body.get("in_dep_min_time", "00:00")).strip() or "00:00",
@@ -633,7 +657,10 @@ class FlightFinderHandler(SimpleHTTPRequestHandler):
             window_end=validated["window_end"],
             expected_currency=validated["currency"],
             max_stops=validated["max_stops"],
+            out_max_stops=validated["out_max_stops"],
+            in_max_stops=validated["in_max_stops"],
             max_flight_hours=validated["max_flight_hours"],
+            max_total_travel_hours=validated["max_total_travel_hours"],
             out_dep_min_time=validated["out_dep_min_time"],
             out_dep_max_time=validated["out_dep_max_time"],
             in_dep_min_time=validated["in_dep_min_time"],
