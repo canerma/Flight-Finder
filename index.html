@@ -733,14 +733,18 @@
         🚀 Uçuşları Tara &amp; Kombinasyon Bul
       </button>
 
+      <button type="button" class="btn-secondary" style="width: 100%; padding: 9px 12px; font-weight: 600;" onclick="clearTodayCache()">
+        🧹 Önbelleği Temizle (Bugün Hariç Sil)
+      </button>
+
       <div class="section-title" style="margin-top: 6px; display: flex; justify-content: space-between; align-items: center;">
-        <span>⚡ Bugün Taranan Sorgular (<span id="cacheCountBadge">0</span>)</span>
-        <button onclick="clearTodayCache()" style="background: transparent; border: 1px solid var(--border); color: var(--muted); font-size: 0.72rem; padding: 2px 7px; border-radius: 5px; cursor: pointer;">
-          Temizle
+        <span>⚡ Önbellek (48 Saat · <span id="cacheCountBadge">0</span>)</span>
+        <button type="button" onclick="clearTodayCache()" style="background: transparent; border: 1px solid var(--border); color: var(--muted); font-size: 0.72rem; padding: 2px 7px; border-radius: 5px; cursor: pointer;">
+          Eski Kayıtları Sil
         </button>
       </div>
       <div id="cachedQueriesBox" class="transfer-box" style="max-height: 170px; overflow-y: auto; font-size: 0.74rem; color: var(--muted);">
-        Henüz bugün taranmış sorgu yok.
+        Son 48 saat içinde taranmış sorgu yok.
       </div>
     </aside>
 
@@ -842,7 +846,7 @@
 
             <div class="grid-2">
               <div class="field">
-                <label>🛫 Sadece Gidiş Aktarma</label>
+                <label>🛫 Gidiş Aktarma</label>
                 <select id="outMaxStops" onchange="recombine()">
                   <option value="">Tümü (Serbest)</option>
                   <option value="0">Sadece Aktarmasız (Direkt)</option>
@@ -863,8 +867,8 @@
 
             <div style="display:flex; gap:6px; flex-wrap:wrap;">
               <button type="button" onclick="setQuickStops('','')" style="background:var(--panel); border:1px solid var(--border); color:#cbd5e1; font-size:0.73rem; padding:4px 8px; border-radius:6px; cursor:pointer;">Tümü Serbest</button>
-              <button type="button" onclick="setQuickStops('0','')" style="background:var(--panel); border:1px solid var(--border); color:#93c5fd; font-size:0.73rem; padding:4px 8px; border-radius:6px; cursor:pointer;">Sadece Gidiş Aktarmasız</button>
-              <button type="button" onclick="setQuickStops('1','')" style="background:var(--panel); border:1px solid var(--border); color:#93c5fd; font-size:0.73rem; padding:4px 8px; border-radius:6px; cursor:pointer;">Sadece Gidiş Maks. 1</button>
+              <button type="button" onclick="setQuickStops('','0')" style="background:var(--panel); border:1px solid var(--border); color:#93c5fd; font-size:0.73rem; padding:4px 8px; border-radius:6px; cursor:pointer;">Sadece Dönüş Aktarmasız</button>
+              <button type="button" onclick="setQuickStops('','1')" style="background:var(--panel); border:1px solid var(--border); color:#93c5fd; font-size:0.73rem; padding:4px 8px; border-radius:6px; cursor:pointer;">Sadece Dönüş Maks. 1</button>
               <button type="button" onclick="setQuickStops('0','0')" style="background:var(--panel); border:1px solid var(--border); color:#cbd5e1; font-size:0.73rem; padding:4px 8px; border-radius:6px; cursor:pointer;">Gidiş &amp; Dönüş Aktarmasız</button>
             </div>
 
@@ -989,20 +993,36 @@
             </div>
           </div>
 
-          <!-- SÜTUN 3: HAVAYOLU SEÇİMİ -->
-          <div style="background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 15px; display: flex; flex-direction: column; gap: 10px;">
-            <div class="section-title" style="display: flex; justify-content: space-between; align-items: center;">
-              <span>✈️ Havayolu Filtresi</span>
-              <div style="display: flex; gap: 6px;">
-                <button type="button" onclick="setAllAirlines(true)" style="background:var(--panel); border:1px solid var(--border); color:#cbd5e1; font-size:0.72rem; padding:2px 7px; border-radius:5px; cursor:pointer;">Tümü</button>
-                <button type="button" onclick="setAllAirlines(false)" style="background:var(--panel); border:1px solid var(--border); color:#cbd5e1; font-size:0.72rem; padding:2px 7px; border-radius:5px; cursor:pointer;">Hiçbiri</button>
+          <!-- SÜTUN 3: HAVAYOLU SEÇİMİ (GİDİŞ VE DÖNÜŞ AYRI) -->
+          <div style="background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 15px; display: flex; flex-direction: column; gap: 12px;">
+            <p style="font-size: 0.75rem; color: var(--muted); margin-bottom: -2px;">
+              Gidiş ve dönüş bacakları için istemediğiniz havayollarının işaretini ayrı ayrı kaldırabilirsiniz:
+            </p>
+
+            <div>
+              <div class="section-title" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                <span>🛫 Gidiş Havayolu Filtresi</span>
+                <div style="display: flex; gap: 6px;">
+                  <button type="button" onclick="setLegAirlines('out', true)" style="background:var(--panel); border:1px solid var(--border); color:#cbd5e1; font-size:0.72rem; padding:2px 7px; border-radius:5px; cursor:pointer;">Tümü</button>
+                  <button type="button" onclick="setLegAirlines('out', false)" style="background:var(--panel); border:1px solid var(--border); color:#cbd5e1; font-size:0.72rem; padding:2px 7px; border-radius:5px; cursor:pointer;">Hiçbiri</button>
+                </div>
+              </div>
+              <div id="outAirlineFilterBox" class="transfer-box" style="background: var(--panel); max-height: 155px; overflow-y: auto; font-size: 0.81rem; color: var(--muted);">
+                Gidiş havayolu listesi bekleniyor.
               </div>
             </div>
-            <p style="font-size: 0.75rem; color: var(--muted);">
-              İstemediğiniz havayollarının işaretini kaldırarak kombinasyonlardan çıkarabilirsiniz:
-            </p>
-            <div id="airlineFilterBox" class="transfer-box" style="background: var(--panel); max-height: 240px; overflow-y: auto; font-size: 0.81rem; color: var(--muted);">
-              Bu arama için doğrulanmış havayolu listesi bekleniyor.
+
+            <div>
+              <div class="section-title" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                <span>🛬 Dönüş Havayolu Filtresi</span>
+                <div style="display: flex; gap: 6px;">
+                  <button type="button" onclick="setLegAirlines('in', true)" style="background:var(--panel); border:1px solid var(--border); color:#cbd5e1; font-size:0.72rem; padding:2px 7px; border-radius:5px; cursor:pointer;">Tümü</button>
+                  <button type="button" onclick="setLegAirlines('in', false)" style="background:var(--panel); border:1px solid var(--border); color:#cbd5e1; font-size:0.72rem; padding:2px 7px; border-radius:5px; cursor:pointer;">Hiçbiri</button>
+                </div>
+              </div>
+              <div id="inAirlineFilterBox" class="transfer-box" style="background: var(--panel); max-height: 155px; overflow-y: auto; font-size: 0.81rem; color: var(--muted);">
+                Dönüş havayolu listesi bekleniyor.
+              </div>
             </div>
           </div>
         </div>
@@ -1088,8 +1108,10 @@
     let lastResponse = null;
     let cachedQueriesList = [];
     let cachedQueriesMap = new Map();
-    let excludedAirlinesSet = new Set();
-    let knownAirlinesList = [];
+    let outExcludedAirlinesSet = new Set();
+    let inExcludedAirlinesSet = new Set();
+    let knownOutAirlinesList = [];
+    let knownInAirlinesList = [];
     let combineRequestSeq = 0;
     let isWatchingProgress = false;
 
@@ -1235,7 +1257,7 @@
 
       const box = document.getElementById("cachedQueriesBox");
       if (cachedQueriesList.length === 0) {
-        box.innerHTML = "Henüz bugün taranmış sorgu yok.";
+        box.innerHTML = "Son 48 saat içinde taranmış sorgu yok.";
       } else {
         box.innerHTML = cachedQueriesList
           .map(q => {
@@ -1247,8 +1269,9 @@
             } else {
               statusBadge = `<span style="color:#ef4444">Hata: ${q.status}</span>`;
             }
+            const dayTag = q.is_today === false ? ` <span style="color:#fbbf24">[${q.cached_date}]</span>` : "";
             return `<div style="display:flex; justify-content:space-between; border-bottom:1px solid rgba(255,255,255,0.05); padding:3px 0;">
-              <span><b>${q.origin}→${q.destination}</b> (${q.date}) [${q.currency}]</span>
+              <span><b>${q.origin}→${q.destination}</b> (${q.date}) [${q.currency}]${dayTag}</span>
               ${statusBadge}
             </div>`;
           })
@@ -1258,15 +1281,22 @@
     }
 
     async function clearTodayCache() {
-      if (!confirm("Bugün taranmış tüm tarih kayıtlarını silmek istediğinize emin misiniz?")) return;
       try {
-        const res = await fetch("/api/cache/clear", { method: "POST" });
+        const res = await fetch("/api/cache/clear", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ keep_today: true })
+        });
         const data = await res.json();
         if (!res.ok) {
           showAlert(data.error || "Önbellek temizlenemedi.", "error");
           return;
         }
         updateCachedQueriesUI(data.cached_queries || [], data.cache_error);
+        showAlert(
+          `🧹 Önbellek temizlendi: İçinde bulunduğumuz gün hariç ${data.removed_count ?? 0} eski kayıt silindi, bugüne ait ${data.kept_count ?? 0} kayıt korundu.`,
+          "info"
+        );
         await recombine();
       } catch (e) {
         showAlert("Önbellek temizleme sırasında bağlantı hatası: " + e, "error");
@@ -1474,21 +1504,20 @@
       box.style.display = mode === "add_cabin_bag" || mode === "add_checked_bag" ? "grid" : "none";
     }
 
-    function renderAirlineFilters(airlines) {
-      const box = document.getElementById("airlineFilterBox");
+    function renderLegAirlineBox(boxId, airlines, excludedSet, leg) {
+      const box = document.getElementById(boxId);
+      if (!box) return;
       if (!airlines || airlines.length === 0) {
-        knownAirlinesList = [];
-        box.innerHTML = "Bu arama için doğrulanmış havayolu bulunmuyor.";
+        box.innerHTML = "Bu bacak için doğrulanmış havayolu bulunmuyor.";
         return;
       }
-      knownAirlinesList = airlines;
-      box.innerHTML = knownAirlinesList
+      box.innerHTML = airlines
         .map(name => {
-          const isChecked = !excludedAirlinesSet.has(name);
+          const isChecked = !excludedSet.has(name);
           const safeName = name.replace(/"/g, "&quot;").replace(/'/g, "&#39;");
           return `
             <label style="display:flex; align-items:center; gap:7px; padding:2px 0; cursor:pointer; color:#e2e8f0;">
-              <input type="checkbox" ${isChecked ? "checked" : ""} onchange="toggleAirlineFilter('${safeName}', this.checked)" />
+              <input type="checkbox" ${isChecked ? "checked" : ""} onchange="toggleLegAirlineFilter('${leg}', '${safeName}', this.checked)" />
               <span>${name}</span>
             </label>
           `;
@@ -1496,11 +1525,19 @@
         .join("");
     }
 
-    function toggleAirlineFilter(name, isChecked) {
+    function renderAirlineFilters(outAirlines, inAirlines) {
+      knownOutAirlinesList = outAirlines || [];
+      knownInAirlinesList = inAirlines || [];
+      renderLegAirlineBox("outAirlineFilterBox", knownOutAirlinesList, outExcludedAirlinesSet, "out");
+      renderLegAirlineBox("inAirlineFilterBox", knownInAirlinesList, inExcludedAirlinesSet, "in");
+    }
+
+    function toggleLegAirlineFilter(leg, name, isChecked) {
+      const targetSet = leg === "out" ? outExcludedAirlinesSet : inExcludedAirlinesSet;
       if (isChecked) {
-        excludedAirlinesSet.delete(name);
+        targetSet.delete(name);
       } else {
-        excludedAirlinesSet.add(name);
+        targetSet.add(name);
       }
       recombine();
     }
@@ -1563,7 +1600,8 @@
         baggage_mode: document.getElementById("baggageMode").value || "none",
         cabin_bag_fee: parseFloat(document.getElementById("cabinBagFee").value || "0"),
         checked_bag_fee: parseFloat(document.getElementById("checkedBagFee").value || "0"),
-        excluded_airlines: Array.from(excludedAirlinesSet),
+        out_excluded_airlines: Array.from(outExcludedAirlinesSet),
+        in_excluded_airlines: Array.from(inExcludedAirlinesSet),
         only_asymmetric: document.getElementById("onlyAsymmetric").checked,
         include_transfer: document.getElementById("includeTransfer").checked,
         transfer_costs,
@@ -1808,9 +1846,14 @@
           airline: c.out_airline,
           departure_time: c.out_departure_time,
           arrival_time: c.out_arrival_time,
+          arrival_date: c.out_arrival_date,
+          arrival_day_offset: c.out_arrival_day_offset,
           stops: c.out_stops,
           price: c.out_price,
-          flight_number: c.out_flight_number
+          flight_number: c.out_flight_number,
+          layover_airports: c.out_layover_airports || [],
+          segments: c.out_segments || [],
+          self_transfer: c.out_self_transfer
         },
         inbound: {
           origin: c.in_origin,
@@ -1819,9 +1862,14 @@
           airline: c.in_airline,
           departure_time: c.in_departure_time,
           arrival_time: c.in_arrival_time,
+          arrival_date: c.in_arrival_date,
+          arrival_day_offset: c.in_arrival_day_offset,
           stops: c.in_stops,
           price: c.in_price,
-          flight_number: c.in_flight_number
+          flight_number: c.in_flight_number,
+          layover_airports: c.in_layover_airports || [],
+          segments: c.in_segments || [],
+          self_transfer: c.in_self_transfer
         }
       };
 
@@ -1843,9 +1891,17 @@
         } else if (data.overall_status === "matched_price_changed") {
           const sign = data.total_price_diff > 0 ? "+" : "";
           box.innerHTML = `<span style="color:#fbbf24">⚠️ <b>Fiyat Değişti:</b> Eski Uçuş Toplamı: ${fmtMoney(data.old_flight_total, curr)} → Yeni: <b>${fmtMoney(data.new_flight_total, curr)}</b> (${sign}${fmtMoney(data.total_price_diff, curr)})</span>`;
+        } else if (data.overall_status === "identity_unverified") {
+          const outMsg = data.outbound.status === "identity_unverified"
+            ? `Gidiş: ${data.outbound.error_message || "Uçuş kimliği doğrulanamadı"}`
+            : `Gidiş: Doğrulandı (${fmtMoney(data.outbound.new_price, curr)})`;
+          const inMsg = data.inbound.status === "identity_unverified"
+            ? `Dönüş: ${data.inbound.error_message || "Uçuş kimliği doğrulanamadı"}`
+            : `Dönüş: Doğrulandı (${fmtMoney(data.inbound.new_price, curr)})`;
+          box.innerHTML = `<span style="color:#fbbf24">⚠️ <b>Uçuş Kimliği Doğrulanamadı:</b> ${outMsg} | ${inMsg} (Kesin fiyat doğrulaması yapılmadı).</span>`;
         } else if (data.overall_status === "flight_not_found") {
-          const outMsg = data.outbound.status === "flight_not_found" ? "Gidiş uçuşu bulunamadı" : `Gidiş: ${fmtMoney(data.outbound.new_price, curr)}`;
-          const inMsg = data.inbound.status === "flight_not_found" ? "Dönüş uçuşu bulunamadı" : `Dönüş: ${fmtMoney(data.inbound.new_price, curr)}`;
+          const outMsg = data.outbound.status === "flight_not_found" ? "Gidiş uçuşu bulunamadı" : (data.outbound.status === "identity_unverified" ? "Gidiş kimliği doğrulanamadı" : `Gidiş: ${fmtMoney(data.outbound.new_price, curr)}`);
+          const inMsg = data.inbound.status === "flight_not_found" ? "Dönüş uçuşu bulunamadı" : (data.inbound.status === "identity_unverified" ? "Dönüş kimliği doğrulanamadı" : `Dönüş: ${fmtMoney(data.inbound.new_price, curr)}`);
           box.innerHTML = `<span style="color:#f87171">❌ <b>Seçili Uçuş Güncel Sonuçlarda Bulunamadı:</b> ${outMsg} | ${inMsg} (Başka uçuşun fiyatı atanmadı).</span>`;
         } else {
           box.innerHTML = `<span style="color:#f87171">⚠️ <b>Tarama Hatası:</b> Gidiş (${data.outbound.query_status}) / Dönüş (${data.inbound.query_status})</span>`;
@@ -1863,12 +1919,25 @@
       if (data.cached_queries) {
         updateCachedQueriesUI(data.cached_queries, data.cache_error);
       }
-      renderAirlineFilters(data.available_airlines || []);
+      renderAirlineFilters(
+        data.available_out_airlines || data.available_airlines || [],
+        data.available_in_airlines || data.available_airlines || []
+      );
 
       const curr = data.currency || "TRY";
       document.getElementById("mOutCount").textContent = data.outbound_count || 0;
       document.getElementById("mInCount").textContent = data.inbound_count || 0;
       document.getElementById("mComboCount").textContent = data.combinations_count || 0;
+
+      if (data.query_summary && Array.isArray(data.query_summary.incomplete_scope_notes) && data.query_summary.incomplete_scope_notes.length > 0) {
+        const sampleRoutes = data.query_summary.incomplete_scope_notes.slice(0, 4).join(", ");
+        const moreCnt = data.query_summary.incomplete_scope_notes.length - 4;
+        const extraTxt = moreCnt > 0 ? ` ve +${moreCnt} rota/gün daha` : "";
+        showAlert(
+          `ℹ️ Tarama kapsamı bilgisi: ${sampleRoutes}${extraTxt} için sayfada yüklenmemiş ek uçuşlar olabilir (mevcut sonuçlar yalnızca toplanıp doğrulanan kartları kapsar).`,
+          "warn"
+        );
+      }
 
       if (!data.has_data) {
         document.getElementById("mBestPrice").textContent = "-";
@@ -2075,13 +2144,15 @@
       }
     }
 
-    function setAllAirlines(selectAll) {
+    function setLegAirlines(leg, selectAll) {
+      const exclSet = leg === "out" ? outExcludedAirlinesSet : inExcludedAirlinesSet;
+      const knownList = leg === "out" ? knownOutAirlinesList : knownInAirlinesList;
       if (selectAll) {
-        excludedAirlinesSet.clear();
+        exclSet.clear();
       } else {
-        knownAirlinesList.forEach(a => excludedAirlinesSet.add(a));
+        knownList.forEach(a => exclSet.add(a));
       }
-      renderAirlineFilters(knownAirlinesList);
+      renderAirlineFilters(knownOutAirlinesList, knownInAirlinesList);
       recombine();
     }
 
@@ -2099,8 +2170,9 @@
       document.getElementById("includeTransfer").checked = false;
       toggleBaggageFeeInputs();
       toggleTransferBox();
-      excludedAirlinesSet.clear();
-      renderAirlineFilters(knownAirlinesList);
+      outExcludedAirlinesSet.clear();
+      inExcludedAirlinesSet.clear();
+      renderAirlineFilters(knownOutAirlinesList, knownInAirlinesList);
       recombine();
     }
 

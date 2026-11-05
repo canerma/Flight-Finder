@@ -11,6 +11,7 @@ from playwright.async_api import async_playwright, Page, BrowserContext, Timeout
 
 CACHE_FILE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "flight_cache.json")
 CACHE_SCHEMA_VERSION = 2
+CACHE_TTL_HOURS = 48
 
 QUERY_STATUS_SUCCESS = "success"
 QUERY_STATUS_NO_RESULTS = "no_results"
@@ -108,9 +109,16 @@ class RouteQueryResult:
     fetched_at: str
     error_message: Optional[str] = None
     from_cache: bool = False
+    limit_reached: bool = False
+    all_loaded_parsed: bool = False
     schema_version: int = CACHE_SCHEMA_VERSION
 
     def to_cache_entry(self) -> Dict[str, Any]:
+        cached_date = (
+            self.fetched_at.split("T")[0]
+            if "T" in self.fetched_at and len(self.fetched_at) >= 10
+            else _today_str()
+        )
         return {
             "schema_version": self.schema_version,
             "origin": self.origin,
@@ -122,7 +130,10 @@ class RouteQueryResult:
             "collected_count": self.collected_count,
             "total_dom_cards": self.total_dom_cards,
             "scope_complete": self.scope_complete,
+            "limit_reached": self.limit_reached,
+            "all_loaded_parsed": self.all_loaded_parsed,
             "scope_note": self.scope_note,
+            "cached_date": cached_date,
             "fetched_at": self.fetched_at,
             "scraped_at": self.fetched_at.split("T")[-1][:8] if "T" in self.fetched_at else self.fetched_at,
             "error_message": self.error_message,
@@ -208,6 +219,64 @@ def parse_stops(stops_str: Optional[str]) -> Optional[int]:
     return None
 
 
+def _parse_arrival_marker_snippet(snippet: Optional[str]) -> Tuple[Optional[int], bool]:
+    """
+    Varış saatine bağlı kısa metin parçasındaki gün farkı işaretini ayrıştırır.
+    Dönüş: (day_offset, has_unparseable_marker)
+    - Desteklenenler: +1, +2, +3, ertesi gün, sonraki gün, next day, N gün sonra, N days later, aynı gün, same day, +0
+    - Ayrıştırılamayan veya çelişkili bir gün ifadesi varsa (None, True) döner (asla 0 varsayılmaz).
+    """
+    if not snippet or not snippet.strip():
+        return None, False
+
+    s = snippet.strip().lower()
+    # Başka bir saate veya cümleye geçmeden önceki ilk 32 karakterlik varış bağlamını al
+    s = re.split(r"\b(?:[01]?\d|2[0-3]):[0-5]\d\b|[;|•\n]", s)[0][:35].strip()
+    if not s:
+        return None, False
+
+    found_offsets = set()
+    unparseable = False
+
+    # 1) +N veya -N işaretleri
+    for m in re.finditer(r"([+-])\s*(\d+)\b", s):
+        sign = m.group(1)
+        val = int(m.group(2))
+        if sign == "+" and val in (0, 1, 2, 3):
+            found_offsets.add(val)
+        else:
+            unparseable = True
+
+    # 2) Açık metinsel ifadeler (+1)
+    if re.search(r"\b(?:ertesi\s+gün|ertesi\s+gun|sonraki\s+gün|sonraki\s+gun|next\s+day)\b", s):
+        found_offsets.add(1)
+
+    # 3) N gün sonra / N days later
+    for m in re.finditer(r"\b(\d+)\s*(?:gün\s*sonra|gun\s*sonra|days?\s*later|gün\s*fark|gun\s*fark)\b", s):
+        val = int(m.group(1))
+        if val in (1, 2, 3):
+            found_offsets.add(val)
+        else:
+            unparseable = True
+
+    # 4) Açık aynı gün ifadeleri (0)
+    if re.search(r"\b(?:aynı\s+gün|ayni\s+gun|same\s+day)\b", s):
+        found_offsets.add(0)
+
+    # 5) Desteklenmeyen / belirsiz gün ifadeleri (örn. önceki gün, farklı gün, N gün önce)
+    if re.search(
+        r"\b(?:önceki\s+gün|onceki\s+gun|previous\s+day|farklı\s+gün|farkli\s+gun|different\s+day|\d+\s*gün\s*önce|\d+\s*days?\s*ago)\b",
+        s,
+    ):
+        unparseable = True
+
+    if unparseable or len(found_offsets) > 1:
+        return None, True
+    if len(found_offsets) == 1:
+        return next(iter(found_offsets)), False
+    return None, False
+
+
 def parse_time_and_day_offset(
     dep_raw: Optional[str],
     arr_raw: Optional[str],
@@ -216,11 +285,18 @@ def parse_time_and_day_offset(
 ) -> Tuple[Optional[str], Optional[str], Optional[int]]:
     """
     Kalkış saati, varış saati ve varış gün farkını (+1, +2 veya 0) çıkarır.
-    Varış saati doğrulanamıyorsa arrival_day_offset = None döner (sessizce aynı gün varsaymaz).
+    Kurallar:
+    - "ertesi gün", "sonraki gün", "next day", "+1", "+2" ve açık tarih işaretlerini ayrıştırır.
+    - İşareti ilgili varış alanına bağlar; başka segmentin gün bilgisini kullanmaz.
+    - Ayrıştırılamayan işareti sessizce aynı gün (0) kabul etmez -> None döner.
+    - Sadece varış saatinin kalkış saatinden küçük olmasına bakarak +1 üretmez; açık işaret yoksa None döner.
+    - Aynı gün (0) kararını yalnızca güvenilir DOM/kart bağlamı ve tutarlı saatlerle doğrular.
     """
     dep_clean: Optional[str] = None
     arr_clean: Optional[str] = None
     day_offset: Optional[int] = None
+    has_unparseable_marker = False
+    has_structured_dom_times = False
 
     if dep_raw:
         m_dep = re.search(r"\b([01]?\d|2[0-3]):([0-5]\d)\b", str(dep_raw))
@@ -228,80 +304,188 @@ def parse_time_and_day_offset(
             dep_clean = f"{int(m_dep.group(1)):02d}:{m_dep.group(2)}"
 
     if arr_raw:
-        m_arr = re.search(r"\b([01]?\d|2[0-3]):([0-5]\d)\s*(?:([+-]\d+))?", str(arr_raw))
+        m_arr = re.search(r"\b([01]?\d|2[0-3]):([0-5]\d)\b(.*)$", str(arr_raw).strip(), flags=re.DOTALL)
         if m_arr:
             arr_clean = f"{int(m_arr.group(1)):02d}:{m_arr.group(2)}"
-            if m_arr.group(3):
-                try:
-                    day_offset = int(m_arr.group(3))
-                except ValueError:
-                    day_offset = None
+            trailing_raw = m_arr.group(3) or ""
+            off, bad = _parse_arrival_marker_snippet(trailing_raw)
+            if bad:
+                has_unparseable_marker = True
+            elif off is not None:
+                day_offset = off
 
-    combined_text = f"{card_text or ''} {aria_label or ''}"
+    if dep_clean is not None and arr_clean is not None:
+        has_structured_dom_times = True
 
-    if (not dep_clean or not arr_clean) and combined_text.strip():
-        matches = list(re.finditer(r"\b([01]?\d|2[0-3]):([0-5]\d)(?:\s*([+-]\d))?\b", combined_text))
+    combined_text = f"{card_text or ''} {aria_label or ''}".strip()
+
+    # Eğer dep_clean veya arr_clean henüz bulunmadıysa önce etiketli ("Kalkış:", "Varış:") alanları ara
+    if (not dep_clean or not arr_clean) and combined_text:
+        m_labeled_dep = re.search(
+            r"(?:kalkış(?:\s+saati)?|departure(?:\s+time)?)\s*[:\-]?\s*\b([01]?\d|2[0-3]):([0-5]\d)\b",
+            combined_text,
+            flags=re.IGNORECASE,
+        )
+        m_labeled_arr = re.search(
+            r"(?:varış(?:\s+saati)?|arrival(?:\s+time)?)\s*[:\-]?\s*\b([01]?\d|2[0-3]):([0-5]\d)\b([^,.;|\n]{0,35})",
+            combined_text,
+            flags=re.IGNORECASE,
+        )
+        if not dep_clean and m_labeled_dep:
+            dep_clean = f"{int(m_labeled_dep.group(1)):02d}:{m_labeled_dep.group(2)}"
+        if not arr_clean and m_labeled_arr:
+            arr_clean = f"{int(m_labeled_arr.group(1)):02d}:{m_labeled_arr.group(2)}"
+            off, bad = _parse_arrival_marker_snippet(m_labeled_arr.group(3))
+            if bad:
+                has_unparseable_marker = True
+            elif off is not None and day_offset is None:
+                day_offset = off
+
+    # Hâlâ bulunmadıysa metindeki ardışık saat çiftini kontrol et
+    if (not dep_clean or not arr_clean) and combined_text:
+        matches = list(
+            re.finditer(
+                r"\b([01]?\d|2[0-3]):([0-5]\d)\b([^,.;|\n0-9]{0,25}(?:[+-]\s*\d+|\b[123]\s*(?:gün\s*sonra|days?\s*later)\b)?[^,.;|\n0-9]{0,15})",
+                combined_text,
+            )
+        )
         unique_matches = []
         for m in matches:
             hhmm = f"{int(m.group(1)):02d}:{m.group(2)}"
-            off = m.group(3)
+            trail = m.group(3) or ""
             if not unique_matches or unique_matches[-1][0] != hhmm:
-                unique_matches.append((hhmm, off))
+                unique_matches.append((hhmm, trail))
         if not dep_clean and len(unique_matches) >= 1:
             dep_clean = unique_matches[0][0]
         if not arr_clean and len(unique_matches) >= 2:
             arr_clean = unique_matches[1][0]
-            if unique_matches[1][1] and day_offset is None:
-                try:
-                    day_offset = int(unique_matches[1][1])
-                except ValueError:
-                    day_offset = None
+            off, bad = _parse_arrival_marker_snippet(unique_matches[1][1])
+            if bad:
+                has_unparseable_marker = True
+            elif off is not None and day_offset is None:
+                day_offset = off
 
-    # Eğer varış saati doğrulandıysa ve henüz +1/+2 yakalanmadıysa kart metninde +1/+2 kontrolü yap
-    if arr_clean is not None and day_offset is None:
-        plus_match = re.search(
-            rf"{re.escape(arr_clean)}\s*\+\s*([123])\b|\b([123])\s*gün\s*sonra\b|\bnext\s*day\b",
-            combined_text,
-            re.IGNORECASE,
+    # Eğer arr_clean biliniyorsa, combined_text içinde özellikle bu varış saatine bağlı işareti kontrol et
+    if arr_clean is not None and day_offset is None and not has_unparseable_marker and combined_text:
+        # Önce "Varış: <arr_clean> <marker>" kalıbına bak
+        labeled_arr_pat = re.compile(
+            rf"(?:varış(?:\s+saati)?|arrival(?:\s+time)?)\s*[:\-]?\s*{re.escape(arr_clean)}\b([^,.;|\n]{{0,35}})",
+            flags=re.IGNORECASE,
         )
-        if plus_match:
-            grp = plus_match.group(1) or plus_match.group(2)
-            day_offset = int(grp) if grp else 1
-        elif dep_clean is not None:
-            # Hem kalkış hem varış saati açıkça okunduysa ve +1/+2 işareti yoksa aynı gün (0)
-            day_offset = 0
+        m_lab = labeled_arr_pat.search(combined_text)
+        if m_lab:
+            off, bad = _parse_arrival_marker_snippet(m_lab.group(1))
+            if bad:
+                has_unparseable_marker = True
+            elif off is not None:
+                day_offset = off
+
+        # Yoksa dep_clean ... arr_clean diziliminde arr_clean'in hemen sonrasındaki parçaya bak
+        if day_offset is None and not has_unparseable_marker:
+            arr_occ_pat = re.compile(rf"\b{re.escape(arr_clean)}\b([^,.;|\n]{{0,35}})", flags=re.IGNORECASE)
+            # Son (nihai varış) eşleşmesini değerlendir
+            occ_matches = list(arr_occ_pat.finditer(combined_text))
+            if occ_matches:
+                last_trail = occ_matches[-1].group(1)
+                off, bad = _parse_arrival_marker_snippet(last_trail)
+                if bad:
+                    has_unparseable_marker = True
+                elif off is not None:
+                    day_offset = off
+
+    if has_unparseable_marker:
+        return dep_clean, arr_clean, None
+
+    # Açık bir gün farkı işareti yoksa, aynı gün (0) olup olmadığını doğrula:
+    # - Hem kalkış hem varış saati bulunmalı
+    # - Doğrulanabilir bir metin/DOM bağlamı (combined_text) olmalı
+    # - Varış saati kalkış saatinden küçükse (örn. 23:00 -> 02:00) ve açık işaret yoksa
+    #   saat dilimi / gece geçişi belirsizliği nedeniyle asla +1 veya 0 uydurma -> None bırak!
+    if day_offset is None and dep_clean is not None and arr_clean is not None and combined_text:
+        dep_mins = int(dep_clean[:2]) * 60 + int(dep_clean[3:5])
+        arr_mins = int(arr_clean[:2]) * 60 + int(arr_clean[3:5])
+        dur_mins = parse_duration_to_minutes(combined_text)
+
+        if arr_mins >= dep_mins:
+            # Eğer toplam süre biliniyorsa ve gece yarısını aşacak kadar uzunsa (örn. dep + dur >= 1440),
+            # açık gün işareti olmadan aynı gün kabul etme
+            if dur_mins is not None and (dep_mins + dur_mins >= 24 * 60 or dur_mins >= 18 * 60):
+                day_offset = None
+            elif has_structured_dom_times or re.search(
+                r"(?:kalkış|varış|departure|arrival|aktarma|nonstop|direkt|sa\b|dk\b|hr\b|min\b)",
+                combined_text,
+                flags=re.IGNORECASE,
+            ):
+                day_offset = 0
 
     return dep_clean, arr_clean, day_offset
+
+
+def compute_arrival_date(departure_date: str, arrival_day_offset: Optional[int]) -> Optional[str]:
+    """
+    Kalkış tarihi (YYYY-MM-DD) ve doğrulanmış gün farkı (arrival_day_offset) varsa
+    varış yerel tarihini hesaplar. Gün farkı doğrulanmamışsa (None) uydurmaz, None döner.
+    """
+    if not departure_date or arrival_day_offset is None:
+        return None
+    try:
+        dt = datetime.strptime(departure_date, "%Y-%m-%d") + timedelta(days=int(arrival_day_offset))
+        return dt.strftime("%Y-%m-%d")
+    except Exception:
+        return None
+
+
+NEGATIVE_BAGGAGE_PATTERNS = [
+    r"\bkabin\s+bagaj[ıi]\s+(?:dahil\s+değil(?:dir)?|dahil\s+degil(?:dir)?|yok(?:tur)?|hariç(?:tir)?|haric(?:tir)?|ücretli(?:dir)?|ucretli(?:dir)?|ek\s+ücretli|bulunmaz)\b",
+    r"\bücretsiz\s+kabin\s+bagaj[ıi]\s+(?:yok(?:tur)?|dahil\s+değil(?:dir)?|dahil\s+degil(?:dir)?|bulunmaz)\b",
+    r"\bno\s+(?:free\s+)?carry[- ]?on(?:\s+bag(?:gage)?)?\b",
+    r"\bcarry[- ]?on(?:\s+bag(?:gage)?)?\s+(?:not\s+included|is\s+not\s+included|excluded|for\s+a\s+fee|extra)\b",
+    r"\boverhead\s+bin\s+(?:not\s+included|excluded|no\s+access)\b",
+    r"\bpersonal\s+item\s+only\b",
+    r"\bsadece\s+(?:kişisel\s+eşya|kisisel\s+esya|koltuk\s+alt[ıi](?:\s+çanta|\s+canta|\s+bagaj)?)\b",
+    r"\byalnızca\s+(?:kişisel\s+eşya|kisisel\s+esya|koltuk\s+alt[ıi](?:\s+çanta|\s+canta|\s+bagaj)?)\b",
+]
+
+POSITIVE_BAGGAGE_PATTERNS = [
+    r"\bücretsiz\s+kabin\s+bagaj[ıi](?!\s*(?:yok|dahil\s+değil|dahil\s+degil|hariç|haric|bulunmaz))\b",
+    r"\bkabin\s+bagaj[ıi]\s+(?:dahil(?:dir)?|ücretsiz(?:dir)?)(?!\s*(?:değil|degil|yok))\b",
+    r"\bfree\s+carry[- ]?on(?:\s+bag(?:gage)?)?(?!\s*(?:not\s+included|excluded))\b",
+    r"\bcarry[- ]?on(?:\s+bag(?:gage)?)?\s+included\b",
+    r"\boverhead\s+bin\s+included\b",
+]
 
 
 def extract_verified_baggage_flag(card_text: Optional[str], aria_label: Optional[str]) -> Optional[bool]:
     """
     Yalnızca kart metninde veya aria-label içinde açıkça kabin bagajı bilgisi varsa True/False döner.
-    Havayolu adına bakarak tahmin yürütmez; bilgi yoksa None döner.
+    - Olumsuz ifadeleri önce yakalar ve maskeler ("Kabin bagajı dahil değil" içindeki "Kabin bagajı dahil"
+      alt metnini olumlu kanıt saymaz).
+    - Bağımsız olumlu ve olumsuz ifadeler bir arada çelişiyorsa None döner.
+    - Bilgi yoksa None döner.
     """
-    blob = f"{card_text or ''} {aria_label or ''}".lower()
-    if any(
-        phrase in blob
-        for phrase in (
-            "ücretsiz kabin bagajı",
-            "kabin bagajı dahil",
-            "free carry-on",
-            "carry-on bag included",
-            "overhead bin included",
-        )
-    ):
-        return True
-    if any(
-        phrase in blob
-        for phrase in (
-            "kabin bagajı yok",
-            "kabin bagajı dahil değil",
-            "no carry-on",
-            "personal item only",
-            "sadece koltuk altı",
-        )
-    ):
+    blob = re.sub(r"\s+", " ", f"{card_text or ''} {aria_label or ''}".lower()).strip()
+    if not blob:
+        return None
+
+    has_negative = False
+    masked_blob = blob
+    for pat in NEGATIVE_BAGGAGE_PATTERNS:
+        if re.search(pat, masked_blob, flags=re.IGNORECASE):
+            has_negative = True
+            masked_blob = re.sub(pat, " [NEG_BAG] ", masked_blob, flags=re.IGNORECASE)
+
+    has_positive = False
+    for pat in POSITIVE_BAGGAGE_PATTERNS:
+        if re.search(pat, masked_blob, flags=re.IGNORECASE):
+            has_positive = True
+            break
+
+    if has_positive and has_negative:
+        return None
+    if has_negative:
         return False
+    if has_positive:
+        return True
     return None
 
 
@@ -310,18 +494,18 @@ def extract_extra_metadata(
     aria_label: Optional[str],
     origin: str,
     destination: str,
-) -> Tuple[Optional[str], Optional[List[str]], Optional[bool]]:
+) -> Tuple[Optional[str], Optional[List[str]], Optional[bool], Optional[List[str]]]:
     """
-    Kart metninden (varsa) uçuş numarası, aktarma havalimanı kodları ve self-transfer bilgisini çıkarır.
-    Yoksa uydurmaz, None döner.
+    Kart metninden (varsa) uçuş numarası, aktarma havalimanı kodları, self-transfer ve sıralı segment
+    numaralarını çıkarır. Yoksa uydurmaz, None döner.
     """
     blob = f"{card_text or ''} {aria_label or ''}"
     if not blob.strip():
-        return None, None, None
+        return None, None, None, None
 
-    # Uçuş numarası (örn. TK 1951, PC 1253, VF 53, LH 1305)
+    # Uçuş numarası ve sıralı segmentler (örn. TK 1951, PC 1253, VF 53, LH 1305)
     fn_matches = re.findall(r"\b([A-Z0-9]{2})\s?(\d{2,4})\b", blob)
-    flight_numbers = []
+    flight_numbers: List[str] = []
     excluded_prefixes = {"SA", "DK", "HR", "TL", "EU", "US", "KG", "AM", "PM"}
     for prefix, num in fn_matches:
         if prefix not in excluded_prefixes and not prefix.isdigit():
@@ -329,14 +513,15 @@ def extract_extra_metadata(
             if code not in flight_numbers:
                 flight_numbers.append(code)
     flight_number = ", ".join(flight_numbers) if flight_numbers else None
+    segments = list(flight_numbers) if flight_numbers else None
 
-    # Aktarma havalimanı (örn. "SAW havalimanında 2 sa 15 dk", "1 stop in IST", "Stopover at FRA")
+    # Aktarma havalimanı (örn. "SAW havalimanında 2 sa 15 dk", "1 stop in IST", "Stopover at FRA", "1 aktarma (SAW)")
     layover_codes: List[str] = []
     for m in re.finditer(
-        r"\b([A-Z]{3})\b(?:\s+havalimanında|\s+üzerinden|\s+aktarmalı)|(?:stop(?:over)?\s+(?:in|at)\s+)([A-Z]{3})\b",
+        r"\b([A-Z]{3})\b(?:\s+havalimanında|\s+üzerinden|\s+aktarmalı)|(?:stop(?:over)?\s+(?:in|at)\s+)([A-Z]{3})\b|(?:aktarma\s*\(\s*([A-Z]{3})\s*\))",
         blob,
     ):
-        code = (m.group(1) or m.group(2) or "").upper()
+        code = (m.group(1) or m.group(2) or m.group(3) or "").upper()
         if code and code not in (origin.upper(), destination.upper()) and code not in layover_codes:
             layover_codes.append(code)
 
@@ -355,7 +540,7 @@ def extract_extra_metadata(
     ):
         self_transfer = True
 
-    return flight_number, (layover_codes if layover_codes else None), self_transfer
+    return flight_number, (layover_codes if layover_codes else None), self_transfer, segments
 
 
 def detect_page_block_or_no_results(page_url: str, page_text: str) -> Optional[str]:
@@ -443,7 +628,7 @@ def parse_raw_card_dicts(
             stops_text = stops_raw if stops is not None else None
 
             cabin_bag = extract_verified_baggage_flag(card_text, aria_label)
-            flight_num, layovers, self_tr = extract_extra_metadata(
+            flight_num, layovers, self_tr, segments = extract_extra_metadata(
                 card_text, aria_label, orig_clean, dest_clean
             )
 
@@ -483,6 +668,7 @@ def parse_raw_card_dicts(
                     flight_number=flight_num,
                     layover_airports=layovers,
                     self_transfer=self_tr,
+                    segments=segments,
                 )
             )
         except Exception:
@@ -496,6 +682,24 @@ def parse_raw_card_dicts(
         )
     )
     return parsed
+
+
+def _html_has_more_flights_button(html_content: str) -> bool:
+    for m in re.finditer(r"<button[^>]*>(.*?)</button>", html_content or "", flags=re.DOTALL | re.IGNORECASE):
+        btn_full = m.group(0).lower()
+        if any(
+            k in btn_full
+            for k in (
+                "daha fazla uçuş",
+                "more flights",
+                "diğer uçuşlar",
+                "tüm uçuşları göster",
+                "show more flights",
+                "view more flights",
+            )
+        ) and not any(k in btn_full for k in ("daha az", "fewer")):
+            return True
+    return False
 
 
 def parse_flights_from_html(
@@ -555,6 +759,8 @@ def parse_flights_from_html(
                 collected_count=0,
                 total_dom_cards=0,
                 scope_complete=True,
+                limit_reached=False,
+                all_loaded_parsed=True,
                 scope_note="Sayfada bu rota/gün için uçuş olmadığı doğrulandı.",
                 fetched_at=now_iso,
             )
@@ -575,6 +781,7 @@ def parse_flights_from_html(
         )
 
     raw_cards: List[Dict[str, Any]] = []
+    valid_price_cards = 0
     for block in card_blocks:
         def _extract_tag_text(pattern: str) -> str:
             m = re.search(pattern, block, flags=re.DOTALL | re.IGNORECASE)
@@ -591,6 +798,9 @@ def parse_flights_from_html(
         aria_matches = re.findall(r'aria-label="([^"]+)"', block, flags=re.IGNORECASE)
         aria_t = " ".join(aria_matches)
         c_text = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", block)).strip()
+
+        if parse_price(price_t) is not None:
+            valid_price_cards += 1
 
         raw_cards.append(
             {
@@ -631,9 +841,13 @@ def parse_flights_from_html(
             error_message="Uçuş kartları ayrıştırılamadı (parse_error).",
         )
 
-    scope_complete = len(parsed_all) >= requested_limit or len(parsed_all) == total_dom_cards
+    more_btn_remaining = _html_has_more_flights_button(html_content)
+    limit_reached = len(parsed_all) >= requested_limit
+    all_loaded_parsed = (valid_price_cards == total_dom_cards) and len(parsed_all) > 0
+    scope_complete = (not more_btn_remaining) and all_loaded_parsed
     scope_note = (
-        f"Sayfadaki {total_dom_cards} karttan {len(parsed_all)} tekil uçuş doğrulandı ve fiyata göre sıralandı."
+        f"Sayfadaki {total_dom_cards} karttan {len(parsed_all)} tekil uçuş doğrulandı "
+        f"(tüm sonuçlar yüklendi: {'evet' if scope_complete else 'hayır'})."
     )
     return RouteQueryResult(
         origin=origin.upper().strip(),
@@ -646,6 +860,8 @@ def parse_flights_from_html(
         collected_count=len(parsed_all),
         total_dom_cards=total_dom_cards,
         scope_complete=scope_complete,
+        limit_reached=limit_reached,
+        all_loaded_parsed=all_loaded_parsed,
         scope_note=scope_note,
         fetched_at=now_iso,
     )
@@ -679,10 +895,15 @@ async def _extract_query_result_from_page(
     currency: str,
     booking_url: str,
     requested_limit: int = 10,
+    max_expansions: int = 3,
+    expansion_timeout_ms: int = 1200,
 ) -> RouteQueryResult:
     """
     Canlı Playwright sayfasından tüm yüklenmiş uçuş kartlarını toplar, doğrular,
     ve durumu (success, no_results, timeout, blocked, parse_error) açıkça sınıflandırır.
+    - "Daha fazla uçuş" butonuna tıklama ve kart okuma adımlarını birbirinden ayırır.
+    - Tıklamadan sonra kart sayısının artmasını veya butonun kaybolmasını sınırlı timeout ile bekler.
+    - limit_reached, all_loaded_parsed ve scope_complete kavramlarını ayrı tutar.
     """
     now_iso = datetime.now().isoformat(timespec="seconds")
     orig_clean = origin.upper().strip()
@@ -697,18 +918,91 @@ async def _extract_query_result_from_page(
     except Exception:
         selector_timed_out = True
 
+    expansion_timed_out = False
+    expansions_done = 0
+
+    # Aşama 1: Varsa "Daha fazla uçuş" butonuna sınırlı sayıda tıkla ve asenkron yüklemeyi bekle
+    try:
+        for _ in range(max_expansions):
+            state_before = await page.evaluate(
+                """() => {
+                    const cards = document.querySelectorAll('li.pIav2d');
+                    const moreBtns = Array.from(document.querySelectorAll('button')).filter(b => {
+                        const t = (b.innerText || b.getAttribute('aria-label') || '').toLowerCase();
+                        return (
+                            t.includes('daha fazla uçuş') ||
+                            t.includes('more flights') ||
+                            t.includes('diğer uçuşlar') ||
+                            t.includes('tüm uçuşları göster') ||
+                            t.includes('show more flights') ||
+                            t.includes('view more flights')
+                        ) && !t.includes('daha az') && !t.includes('fewer');
+                    });
+                    if (moreBtns.length === 0) {
+                        return { clicked: false, prev_count: cards.length };
+                    }
+                    try {
+                        moreBtns[0].click();
+                        return { clicked: true, prev_count: cards.length };
+                    } catch (e) {
+                        return { clicked: false, prev_count: cards.length, click_error: true };
+                    }
+                }"""
+            )
+            if not state_before or not state_before.get("clicked"):
+                if state_before and state_before.get("click_error"):
+                    expansion_timed_out = True
+                break
+
+            prev_count = int(state_before.get("prev_count", 0))
+            try:
+                await page.wait_for_function(
+                    """(prevCount) => {
+                        const curCount = document.querySelectorAll('li.pIav2d').length;
+                        if (curCount > prevCount) return true;
+                        if (document.body && document.body.getAttribute('data-all-flights-loaded') === 'true') return true;
+                        const moreBtns = Array.from(document.querySelectorAll('button')).filter(b => {
+                            const t = (b.innerText || b.getAttribute('aria-label') || '').toLowerCase();
+                            return (
+                                t.includes('daha fazla uçuş') ||
+                                t.includes('more flights') ||
+                                t.includes('diğer uçuşlar') ||
+                                t.includes('tüm uçuşları göster') ||
+                                t.includes('show more flights') ||
+                                t.includes('view more flights')
+                            ) && !t.includes('daha az') && !t.includes('fewer');
+                        });
+                        return moreBtns.length === 0;
+                    }""",
+                    arg=prev_count,
+                    timeout=expansion_timeout_ms,
+                )
+                expansions_done += 1
+                await page.wait_for_timeout(80)
+            except PlaywrightTimeoutError:
+                expansion_timed_out = True
+                break
+            except Exception:
+                expansion_timed_out = True
+                break
+    except Exception:
+        expansion_timed_out = True
+
+    # Aşama 2: Yüklenmiş kartları ve sayfa durumunu ayrı bir adımda oku
     try:
         page_info = await page.evaluate(
             """() => {
-                // Varsa "Daha fazla uçuş göster" / "View more flights" butonuna basmayı dene
                 const moreBtns = Array.from(document.querySelectorAll('button')).filter(b => {
                     const t = (b.innerText || b.getAttribute('aria-label') || '').toLowerCase();
-                    return t.includes('daha fazla uçuş') || t.includes('more flights') || t.includes('diğer uçuşlar');
+                    return (
+                        t.includes('daha fazla uçuş') ||
+                        t.includes('more flights') ||
+                        t.includes('diğer uçuşlar') ||
+                        t.includes('tüm uçuşları göster') ||
+                        t.includes('show more flights') ||
+                        t.includes('view more flights')
+                    ) && !t.includes('daha az') && !t.includes('fewer');
                 });
-                if (moreBtns.length > 0) {
-                    try { moreBtns[0].click(); } catch (e) {}
-                }
-
                 const cards = Array.from(document.querySelectorAll('li.pIav2d'));
                 const extracted = cards.map(card => {
                     const depEl = card.querySelector('span[aria-label*="Kalkış saati"], span[aria-label*="Departure time"]');
@@ -733,6 +1027,7 @@ async def _extract_query_result_from_page(
                     url: window.location.href,
                     body_text: document.body ? document.body.innerText.slice(0, 6000) : '',
                     total_dom_cards: cards.length,
+                    more_button_remaining: moreBtns.length > 0,
                     cards: extracted
                 };
             }"""
@@ -757,6 +1052,7 @@ async def _extract_query_result_from_page(
     page_url = page_info.get("url", page.url)
     body_text = page_info.get("body_text", "")
     total_dom_cards = int(page_info.get("total_dom_cards", 0))
+    more_button_remaining = bool(page_info.get("more_button_remaining", False))
     raw_cards = page_info.get("cards", [])
 
     block_or_empty = detect_page_block_or_no_results(page_url, body_text)
@@ -790,6 +1086,8 @@ async def _extract_query_result_from_page(
                 collected_count=0,
                 total_dom_cards=0,
                 scope_complete=True,
+                limit_reached=False,
+                all_loaded_parsed=True,
                 scope_note="Sayfada bu rota/tarih için uygun uçuş olmadığı doğrulandı.",
                 fetched_at=now_iso,
             )
@@ -810,6 +1108,7 @@ async def _extract_query_result_from_page(
             error_message="Uçuş kartları yüklenemedi veya 'sonuç yok' durumu doğrulanamadı.",
         )
 
+    valid_price_cards = sum(1 for item in raw_cards if parse_price(item.get("price_raw")) is not None)
     parsed_all = parse_raw_card_dicts(
         raw_cards=raw_cards,
         origin=orig_clean,
@@ -836,10 +1135,35 @@ async def _extract_query_result_from_page(
             error_message="DOM kartları ayrıştırılamadı (parse_error).",
         )
 
-    scope_complete = len(parsed_all) >= requested_limit or len(parsed_all) == total_dom_cards
-    scope_note = (
-        f"Yüklenen {total_dom_cards} karttan {len(parsed_all)} tekil uçuş doğrulandı ve fiyata göre sıralandı."
+    # Üç kavramı birbirinden ayır:
+    # 1) limit_reached: İstenen sayıya ulaşıldı mı?
+    # 2) all_loaded_parsed: Yüklenen tüm DOM kartlarının fiyatı geçerli şekilde ayrıştırıldı mı?
+    # 3) scope_complete: Sayfadaki tüm sonuçlar eksiksiz yüklendi ve ayrıştırıldı mı?
+    limit_reached = len(parsed_all) >= requested_limit
+    all_loaded_parsed = (valid_price_cards == total_dom_cards) and len(parsed_all) > 0
+    scope_complete = (
+        (not expansion_timed_out)
+        and (not more_button_remaining)
+        and all_loaded_parsed
     )
+
+    if scope_complete:
+        scope_note = (
+            f"Sayfadaki tüm sonuçlar yüklendi ({total_dom_cards} DOM kartından {len(parsed_all)} tekil uçuş doğrulandı)."
+        )
+    else:
+        reasons = []
+        if expansion_timed_out:
+            reasons.append("'Daha fazla uçuş' genişletmesi zaman aşımına uğradı")
+        if more_button_remaining:
+            reasons.append("sayfada yüklenmemiş ek uçuşlar var")
+        if not all_loaded_parsed:
+            reasons.append(f"{total_dom_cards - valid_price_cards} kart ayrıştırılamadı")
+        reason_str = ", ".join(reasons) if reasons else "kısmi yükleme"
+        scope_note = (
+            f"Kısmi kapsam ({reason_str}): Yüklenen {total_dom_cards} karttan {len(parsed_all)} tekil uçuş toplandı."
+        )
+
     return RouteQueryResult(
         origin=orig_clean,
         destination=dest_clean,
@@ -851,6 +1175,8 @@ async def _extract_query_result_from_page(
         collected_count=len(parsed_all),
         total_dom_cards=total_dom_cards,
         scope_complete=scope_complete,
+        limit_reached=limit_reached,
+        all_loaded_parsed=all_loaded_parsed,
         scope_note=scope_note,
         fetched_at=now_iso,
     )
@@ -964,7 +1290,7 @@ async def scrape_route_on_date(
         max_results_per_route=max_results_per_route,
         semaphore=semaphore,
     )
-    return res.flights[:max_results_per_route]
+    return list(res.flights)
 
 
 def generate_date_range(start_date: str, end_date: str) -> List[str]:
@@ -1012,31 +1338,111 @@ def is_cache_entry_usable(entry: Optional[Dict[str, Any]], requested_limit: int)
     if status == QUERY_STATUS_NO_RESULTS:
         return True
 
+    scope_complete = bool(entry.get("scope_complete", False))
     cached_req_limit = int(entry.get("requested_limit", 0) or 0)
     collected_count = int(entry.get("collected_count", len(entry.get("flights", []))) or 0)
-    if requested_limit <= cached_req_limit or requested_limit <= collected_count:
+    if scope_complete or requested_limit <= cached_req_limit or requested_limit <= collected_count:
         return True
     return False
 
 
+def _extract_entry_day(entry: Dict[str, Any], fallback_day: Optional[str] = None) -> str:
+    """
+    Önbellek kaydının ait olduğu yerel günü (YYYY-MM-DD) çıkarır.
+    """
+    cdate = str(entry.get("cached_date") or "").strip()
+    if re.match(r"^\d{4}-\d{2}-\d{2}$", cdate):
+        return cdate
+    fetched = str(entry.get("fetched_at") or "").strip()
+    if len(fetched) >= 10 and re.match(r"^\d{4}-\d{2}-\d{2}", fetched[:10]):
+        return fetched[:10]
+    if fallback_day and re.match(r"^\d{4}-\d{2}-\d{2}$", str(fallback_day).strip()):
+        return str(fallback_day).strip()
+    return _today_str()
+
+
+def _parse_entry_datetime(entry: Dict[str, Any], fallback_day: Optional[str] = None) -> Optional[datetime]:
+    fetched = str(entry.get("fetched_at") or "").strip()
+    if fetched:
+        try:
+            return datetime.fromisoformat(fetched[:19])
+        except Exception:
+            pass
+    day_str = _extract_entry_day(entry, fallback_day=fallback_day)
+    scraped_at = str(entry.get("scraped_at") or "12:00:00").strip()[:8]
+    try:
+        return datetime.fromisoformat(f"{day_str}T{scraped_at}")
+    except Exception:
+        try:
+            return datetime.strptime(day_str, "%Y-%m-%d")
+        except Exception:
+            return None
+
+
+def _is_entry_within_ttl(
+    entry: Dict[str, Any],
+    fallback_day: Optional[str] = None,
+    now_dt: Optional[datetime] = None,
+    ttl_hours: int = CACHE_TTL_HOURS,
+) -> bool:
+    """
+    Önbellek kaydının son 48 saat (CACHE_TTL_HOURS) içinde oluşturulup oluşturulmadığını kontrol eder.
+    """
+    ref_now = now_dt or datetime.now()
+    dt = _parse_entry_datetime(entry, fallback_day=fallback_day)
+    if dt is None:
+        return False
+    age_seconds = (ref_now - dt).total_seconds()
+    return age_seconds <= (ttl_hours * 3600)
+
+
 def load_daily_cache(cache_path: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Önbellek dosyasını okur ve son 48 saat (CACHE_TTL_HOURS) içindeki geçerli kayıtları korur.
+    48 saatten eski kayıtlar otomatik olarak ayıklanır.
+    """
     target_path = cache_path or CACHE_FILE_PATH
     today = _today_str()
+    now_dt = datetime.now()
     with _CACHE_LOCK:
         if not os.path.exists(target_path):
-            return {"cache_day": today, "schema_version": CACHE_SCHEMA_VERSION, "entries": {}}
+            return {
+                "cache_day": today,
+                "ttl_hours": CACHE_TTL_HOURS,
+                "schema_version": CACHE_SCHEMA_VERSION,
+                "entries": {},
+            }
         try:
             with open(target_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            if data.get("cache_day") != today:
-                return {"cache_day": today, "schema_version": CACHE_SCHEMA_VERSION, "entries": {}}
-            if "entries" not in data or not isinstance(data["entries"], dict):
-                data["entries"] = {}
+            file_day = data.get("cache_day") or today
+            raw_entries = data.get("entries", {})
+            if not isinstance(raw_entries, dict):
+                raw_entries = {}
+
+            valid_entries: Dict[str, Any] = {}
+            for k, val in raw_entries.items():
+                if not isinstance(val, dict):
+                    continue
+                if _is_entry_within_ttl(val, fallback_day=file_day, now_dt=now_dt, ttl_hours=CACHE_TTL_HOURS):
+                    if "cached_date" not in val:
+                        val["cached_date"] = _extract_entry_day(val, fallback_day=file_day)
+                    valid_entries[k] = val
+
+            data["cache_day"] = today
+            data["ttl_hours"] = CACHE_TTL_HOURS
+            data["schema_version"] = CACHE_SCHEMA_VERSION
+            data["entries"] = valid_entries
             return data
         except Exception as exc:
             global _LAST_CACHE_ERROR
             _LAST_CACHE_ERROR = f"Önbellek okuma hatası: {exc}"
-            return {"cache_day": today, "schema_version": CACHE_SCHEMA_VERSION, "entries": {}}
+            return {
+                "cache_day": today,
+                "ttl_hours": CACHE_TTL_HOURS,
+                "schema_version": CACHE_SCHEMA_VERSION,
+                "entries": {},
+            }
 
 
 def save_daily_cache(cache_data: Dict[str, Any], cache_path: Optional[str] = None) -> None:
@@ -1050,6 +1456,7 @@ def save_daily_cache(cache_data: Dict[str, Any], cache_path: Optional[str] = Non
         tmp_path = f"{target_path}.tmp.{os.getpid()}.{threading.get_ident()}"
         try:
             cache_data["schema_version"] = CACHE_SCHEMA_VERSION
+            cache_data["ttl_hours"] = CACHE_TTL_HOURS
             with open(tmp_path, "w", encoding="utf-8") as f:
                 json.dump(cache_data, f, ensure_ascii=False, indent=2)
             os.replace(tmp_path, target_path)
@@ -1079,29 +1486,79 @@ def update_single_cache_entry(
         if expected_epoch is not None and expected_epoch != _CACHE_EPOCH:
             return False
         current = load_daily_cache(cache_path=cache_path)
+        if "cached_date" not in entry_dict:
+            entry_dict["cached_date"] = _extract_entry_day(entry_dict, fallback_day=_today_str())
         current["entries"][key] = entry_dict
         save_daily_cache(current, cache_path=cache_path)
         return True
 
 
-def clear_daily_cache(cache_path: Optional[str] = None) -> None:
+def clear_daily_cache(cache_path: Optional[str] = None, keep_today: bool = False) -> Dict[str, int]:
+    """
+    keep_today=True ise içinde bulunduğumuz gün (_today_str()) hariç diğer tüm önbellek
+    kayıtlarını siler. keep_today=False (varsayılan) ise tüm önbelleği sıfırlar.
+    """
     global _CACHE_EPOCH
     with _CACHE_LOCK:
+        today = _today_str()
+        current = load_daily_cache(cache_path=cache_path)
+        entries = current.get("entries", {})
+        if not keep_today:
+            removed_count = len(entries)
+            _CACHE_EPOCH += 1
+            save_daily_cache(
+                {
+                    "cache_day": today,
+                    "ttl_hours": CACHE_TTL_HOURS,
+                    "schema_version": CACHE_SCHEMA_VERSION,
+                    "entries": {},
+                },
+                cache_path=cache_path,
+            )
+            return {"removed_count": removed_count, "kept_count": 0}
+
+        kept_entries: Dict[str, Any] = {}
+        removed_count = 0
+        for k, val in entries.items():
+            if not isinstance(val, dict):
+                removed_count += 1
+                continue
+            entry_day = _extract_entry_day(val, fallback_day=today)
+            if entry_day == today:
+                kept_entries[k] = val
+            else:
+                removed_count += 1
+
         _CACHE_EPOCH += 1
         save_daily_cache(
-            {"cache_day": _today_str(), "schema_version": CACHE_SCHEMA_VERSION, "entries": {}},
+            {
+                "cache_day": today,
+                "ttl_hours": CACHE_TTL_HOURS,
+                "schema_version": CACHE_SCHEMA_VERSION,
+                "entries": kept_entries,
+            },
             cache_path=cache_path,
         )
+        return {"removed_count": removed_count, "kept_count": len(kept_entries)}
+
+
+def clear_cache_except_today(cache_path: Optional[str] = None) -> Dict[str, int]:
+    """
+    İçinde bulunduğumuz gün (bugün) taranmış kayıtları korur; önceki günlere ait tüm kayıtları siler.
+    """
+    return clear_daily_cache(cache_path=cache_path, keep_today=True)
 
 
 def get_today_cached_queries(cache_path: Optional[str] = None) -> List[Dict[str, Any]]:
     data = load_daily_cache(cache_path=cache_path)
     entries = data.get("entries", {})
+    today = _today_str()
     summary = []
     for key, val in entries.items():
         if not isinstance(val, dict):
             continue
         status = val.get("status", QUERY_STATUS_SUCCESS if val.get("schema_version") == CACHE_SCHEMA_VERSION else "legacy")
+        cached_date = _extract_entry_day(val, fallback_day=today)
         summary.append(
             {
                 "key": key,
@@ -1114,6 +1571,8 @@ def get_today_cached_queries(cache_path: Optional[str] = None) -> List[Dict[str,
                 "requested_limit": val.get("requested_limit", 0),
                 "collected_count": val.get("collected_count", len(val.get("flights", []))),
                 "flight_count": len(val.get("flights", [])),
+                "cached_date": cached_date,
+                "is_today": cached_date == today,
                 "fetched_at": val.get("fetched_at", ""),
                 "scraped_at": val.get("scraped_at", ""),
                 "error_message": val.get("error_message"),
@@ -1174,7 +1633,7 @@ async def scrape_one_way_flights_async(
         entry = entries.get(ckey)
         if not bypass_cache and is_cache_entry_usable(entry, max_results_per_route):
             cached_list = [FlightOption.from_dict(item) for item in entry.get("flights", [])]
-            all_flights.extend(cached_list[:max_results_per_route])
+            all_flights.extend(cached_list)
             completed += 1
             if progress_callback:
                 progress_callback(completed, total_tasks, f"[Önbellekten ⚡] {orig} -> {dest} ({d})")
@@ -1224,7 +1683,7 @@ async def scrape_one_way_flights_async(
                     total_tasks,
                     f"{orig} -> {dest} ({d}) [{qres.status}]",
                 )
-            return qres.flights[:max_results_per_route]
+            return list(qres.flights)
 
         results = await asyncio.gather(
             *[_wrapped_scrape(orig, dest, d) for orig, dest, d in uncached_tasks]
@@ -1292,6 +1751,7 @@ async def scrape_decoupled_roundtrip_async(
     Ayrık Tek Yön (Decoupled One-Way) mantığıyla gidiş ve dönüş rotalarını dönüşümlü tarar.
     Yalnızca kullanılabilir önbellek kayıtlarını (success / no_results ve yeterli requested_limit)
     önbellekten alır; hatalı veya eksik kapsamlı sorguları yeniden tarar.
+    Toplanan ham uçuşları filtreleme öncesi kesmez; tamamını döndürür.
     """
     home = home_airport.upper().strip()
     targets = []
@@ -1348,9 +1808,7 @@ async def scrape_decoupled_roundtrip_async(
         ckey = _cache_key(orig, dest, d, currency)
         entry = entries.get(ckey)
         if is_cache_entry_usable(entry, max_results_per_route):
-            cached_list = [FlightOption.from_dict(item) for item in entry.get("flights", [])][
-                :max_results_per_route
-            ]
+            cached_list = [FlightOption.from_dict(item) for item in entry.get("flights", [])]
             if direction == "OUT":
                 outbound_flights.extend(cached_list)
             else:
@@ -1426,11 +1884,10 @@ async def scrape_decoupled_roundtrip_async(
         for direction, qres in results:
             if qres is None or qres.status != QUERY_STATUS_SUCCESS:
                 continue
-            sliced = qres.flights[:max_results_per_route]
             if direction == "OUT":
-                outbound_flights.extend(sliced)
+                outbound_flights.extend(qres.flights)
             else:
-                inbound_flights.extend(sliced)
+                inbound_flights.extend(qres.flights)
 
         await context.close()
         await browser.close()
@@ -1476,32 +1933,73 @@ def scrape_decoupled_roundtrip(
     )
 
 
-def match_selected_flight(
+def _normalize_str_list(val: Any) -> List[str]:
+    if not val or not isinstance(val, (list, tuple)):
+        return []
+    return [str(x).strip().upper() for x in val if str(x).strip()]
+
+
+def evaluate_selected_flight_match(
     target_spec: Dict[str, Any],
     candidates: List[FlightOption],
-) -> Optional[FlightOption]:
+) -> Tuple[str, Optional[FlightOption], Optional[str]]:
     """
-    Yeniden kontrol (recheck) sırasında yalnızca aynı uçuşu eşleştirir;
-    başka bir uçuşun fiyatını seçili uçuşa asla yazmaz.
+    Seçili uçuşun güncel adaylar arasındaki eşleşmesini sıkı kimlik doğrulamasıyla değerlendirir.
+    Dönüş: (match_status, matched_flight, message)
+      - "matched": Tek ve kimliği doğrulanmış aday eşleşti.
+      - "not_found": Hiçbir aday eşleşmedi.
+      - "identity_unverified": Aday(lar) saat/rota bazında benziyor fakat uçuş numarası, aktarma
+        segmenti veya varış günü/kimlik bilgisi yetersiz ya da birden fazla aday belirsiz eşleşiyor.
     """
     orig = str(target_spec.get("origin", "")).upper().strip()
     dest = str(target_spec.get("destination", "")).upper().strip()
     date_str = str(target_spec.get("date", "")).strip()
     airline = str(target_spec.get("airline", "")).strip().lower()
-    dep_time = target_spec.get("departure_time") or None
-    arr_time = target_spec.get("arrival_time") or None
-    stops = target_spec.get("stops", None)
-    if stops is not None and stops != "":
-        stops = int(stops)
+    dep_time = (str(target_spec.get("departure_time") or "").strip()) or None
+    arr_time = (str(target_spec.get("arrival_time") or "").strip()) or None
+    arr_date = (str(target_spec.get("arrival_date") or "").strip()) or None
+
+    raw_offset = target_spec.get("arrival_day_offset", None)
+    if raw_offset is not None and raw_offset != "":
+        try:
+            arr_offset: Optional[int] = int(raw_offset)
+        except (TypeError, ValueError):
+            arr_offset = None
+    else:
+        arr_offset = None
+
+    raw_stops = target_spec.get("stops", None)
+    if raw_stops is not None and raw_stops != "":
+        try:
+            stops: Optional[int] = int(raw_stops)
+        except (TypeError, ValueError):
+            stops = None
     else:
         stops = None
-    flight_num = (target_spec.get("flight_number") or "").strip().lower()
+
+    # Eğer varış tarihi açıkça verilmemiş ama offset + kalkış tarihi varsa hesapla
+    if not arr_date and date_str and arr_offset is not None:
+        arr_date = compute_arrival_date(date_str, arr_offset)
+
+    flight_num = (str(target_spec.get("flight_number") or "").strip().upper()) or None
+    target_layovers = _normalize_str_list(target_spec.get("layover_airports"))
+    target_segments = _normalize_str_list(target_spec.get("segments"))
+    target_self_transfer = target_spec.get("self_transfer", None)
+
+    # Temel kimlik alanları (kalkış/varış saati, aktarma sayısı, havayolu) eksikse kesin doğrulama yapılamaz
+    if not orig or not dest or not date_str or not airline or not dep_time or not arr_time or stops is None:
+        return (
+            "identity_unverified",
+            None,
+            "Seçili uçuşun temel kimlik bilgileri (saat, aktarma veya havayolu) eksik olduğundan doğrulanamadı.",
+        )
+
+    strict_matches: List[FlightOption] = []
+    partial_unverified_matches: List[FlightOption] = []
 
     for cand in candidates:
         if cand.origin != orig or cand.destination != dest or cand.date != date_str:
             continue
-        if flight_num and cand.flight_number and cand.flight_number.strip().lower() == flight_num:
-            return cand
         if cand.airline.strip().lower() != airline:
             continue
         if (cand.departure_time or None) != dep_time:
@@ -1510,7 +2008,99 @@ def match_selected_flight(
             continue
         if cand.stops != stops:
             continue
-        return cand
+
+        cand_flight_num = (cand.flight_number or "").strip().upper() or None
+        # 1) Her iki tarafta uçuş numarası varsa ve farklıysa kesinlikle ele!
+        if flight_num and cand_flight_num and flight_num != cand_flight_num:
+            continue
+
+        # 2) Varış tarihi ve gün farkı kontrolü (farklı varış günleri asla aynı uçuş kabul edilmez)
+        cand_arr_date = (cand.arrival_date or "").strip() or None
+        cand_arr_offset = cand.arrival_day_offset
+        if arr_date and cand_arr_date and arr_date != cand_arr_date:
+            continue
+        if arr_offset is not None and cand_arr_offset is not None and arr_offset != cand_arr_offset:
+            continue
+
+        # 3) Aktarma segmentleri ve aktarma havalimanları kontrolü
+        cand_layovers = _normalize_str_list(cand.layover_airports)
+        cand_segments = _normalize_str_list(cand.segments)
+        if target_layovers and cand_layovers and target_layovers != cand_layovers:
+            continue
+        if target_segments and cand_segments and target_segments != cand_segments:
+            continue
+        if target_self_transfer is not None and cand.self_transfer is not None:
+            if bool(target_self_transfer) != bool(cand.self_transfer):
+                continue
+
+        # Şimdi kimlik kanıtının yeterliliğini değerlendir:
+        # Varış günü en az bir yolla (arrival_date veya arrival_day_offset) her iki tarafta da doğrulanmış olmalı
+        has_verified_arrival_day = (
+            (arr_date is not None and cand_arr_date is not None and arr_date == cand_arr_date)
+            or (arr_offset is not None and cand_arr_offset is not None and arr_offset == cand_arr_offset)
+        )
+        if not has_verified_arrival_day:
+            partial_unverified_matches.append(cand)
+            continue
+
+        # Eğer hedefte uçuş numarası, aktarma havalimanı veya segment listesi varsa ve adayda yoksa -> doğrulanamadı
+        if flight_num and not cand_flight_num:
+            partial_unverified_matches.append(cand)
+            continue
+        if target_layovers and not cand_layovers:
+            partial_unverified_matches.append(cand)
+            continue
+        if target_segments and not cand_segments:
+            partial_unverified_matches.append(cand)
+            continue
+
+        # Aktarmalı uçuşlarda (stops > 0), uçuş numarası, sıralı segmentler veya aktarma havalimanlarından
+        # en az biri her iki tarafta da mevcut olup eşleşmeli; aksi halde farklı aktarma kombinasyonları ayırt edilemez.
+        if stops > 0:
+            has_connecting_identity = (
+                (flight_num is not None and cand_flight_num is not None and flight_num == cand_flight_num)
+                or (bool(target_segments) and bool(cand_segments) and target_segments == cand_segments)
+                or (bool(target_layovers) and bool(cand_layovers) and target_layovers == cand_layovers)
+            )
+            if not has_connecting_identity:
+                partial_unverified_matches.append(cand)
+                continue
+
+        strict_matches.append(cand)
+
+    if len(strict_matches) == 1:
+        return "matched", strict_matches[0], None
+
+    if len(strict_matches) > 1:
+        # Birden fazla aday tüm mevcut alanlarla eşleşiyorsa ve ayırt edici uçuş numarası/segment yoksa belirsizdir
+        return (
+            "identity_unverified",
+            None,
+            f"Aynı saat ve kriterlere sahip {len(strict_matches)} farklı aday bulundu; uçuş kimliği tekil olarak doğrulanamadı.",
+        )
+
+    if partial_unverified_matches:
+        return (
+            "identity_unverified",
+            None,
+            "Benzer saatli uçuş bulundu ancak uçuş numarası, varış günü veya aktarma detayları doğrulanamadığı için fiyat kesinleştirilemedi.",
+        )
+
+    return "not_found", None, "Seçili uçuş güncel arama sonuçlarında bulunamadı."
+
+
+def match_selected_flight(
+    target_spec: Dict[str, Any],
+    candidates: List[FlightOption],
+) -> Optional[FlightOption]:
+    """
+    Yeniden kontrol (recheck) sırasında yalnızca kimliği tam doğrulanmış tekil uçuşu eşleştirir;
+    farklı uçuş numarasını, farklı varış gününü, farklı aktarma segmentini veya kimliği belirsiz
+    adayları asla eşleştirmez.
+    """
+    status, matched, _ = evaluate_selected_flight_match(target_spec, candidates)
+    if status == "matched":
+        return matched
     return None
 
 
@@ -1524,7 +2114,7 @@ async def recheck_combination_async(
 ) -> Dict[str, Any]:
     """
     Seçili kombinasyonun yalnızca gidiş ve dönüş rota/günlerini önbelleği atlayarak yeniden tarar.
-    Aynı uçuşun bulunup bulunmadığını ve fiyat farkını doğrular.
+    Aynı uçuşun bulunup bulunmadığını, kimlik doğrulama durumunu ve fiyat farkını doğrular.
     """
     curr_clean = currency.upper().strip()
     start_epoch = get_cache_epoch()
@@ -1583,12 +2173,22 @@ async def recheck_combination_async(
                 "price_diff": None,
                 "matched_flight": None,
             }
-        matched = match_selected_flight(spec, qres.flights)
-        if matched is None:
+        match_status, matched, match_msg = evaluate_selected_flight_match(spec, qres.flights)
+        if match_status == "identity_unverified":
+            return {
+                "status": "identity_unverified",
+                "query_status": qres.status,
+                "error_message": match_msg or "Uçuş kimliği doğrulanamadı.",
+                "old_price": old_price,
+                "new_price": None,
+                "price_diff": None,
+                "matched_flight": None,
+            }
+        if match_status != "matched" or matched is None:
             return {
                 "status": "flight_not_found",
                 "query_status": qres.status,
-                "error_message": "Seçili uçuş güncel arama sonuçlarında bulunamadı.",
+                "error_message": match_msg or "Seçili uçuş güncel arama sonuçlarında bulunamadı.",
                 "old_price": old_price,
                 "new_price": None,
                 "price_diff": None,
@@ -1613,6 +2213,8 @@ async def recheck_combination_async(
         overall = "scrape_error"
     elif out_eval["status"] == "flight_not_found" or in_eval["status"] == "flight_not_found":
         overall = "flight_not_found"
+    elif out_eval["status"] == "identity_unverified" or in_eval["status"] == "identity_unverified":
+        overall = "identity_unverified"
     elif out_eval["status"] == "matched_price_changed" or in_eval["status"] == "matched_price_changed":
         overall = "matched_price_changed"
     else:

@@ -230,6 +230,14 @@ def validate_search_request(
     except (ValueError, TypeError):
         return None, "Geçersiz bagaj ek ücreti."
 
+    display_limit_raw = body.get("display_limit", 250)
+    try:
+        display_limit = int(display_limit_raw) if display_limit_raw is not None and str(display_limit_raw).strip() != "" else 250
+        if display_limit < 1 or display_limit > 2000:
+            return None, "Görüntüleme limiti (display_limit) 1 ile 2000 arasında olmalıdır."
+    except (ValueError, TypeError):
+        return None, "Geçersiz görüntüleme limiti (display_limit)."
+
     validated = {
         "home_airport": home_airport,
         "target_airports": target_airports,
@@ -243,6 +251,7 @@ def validate_search_request(
         "min_stay_days": min_stay_days,
         "max_stay_days": max_stay_days,
         "max_results_per_route": max_results_per_route,
+        "display_limit": display_limit,
         "max_concurrent_pages": max_concurrent_pages,
         "max_stops": max_stops,
         "out_max_stops": out_max_stops,
@@ -257,6 +266,8 @@ def validate_search_request(
         "cabin_bag_fee": cabin_bag_fee,
         "checked_bag_fee": checked_bag_fee,
         "excluded_airlines": body.get("excluded_airlines", []) or [],
+        "out_excluded_airlines": body.get("out_excluded_airlines", []) or [],
+        "in_excluded_airlines": body.get("in_excluded_airlines", []) or [],
         "only_asymmetric": bool(body.get("only_asymmetric", False)),
         "include_transfer": bool(body.get("include_transfer", False)),
         "transfer_costs": body.get("transfer_costs", {}) or {},
@@ -280,6 +291,8 @@ def collect_search_state_from_daily_cache(
     """
     Yalnızca istenen (home_airport, target_airports, tarih aralığı, para birimi, max_results)
     ile tam eşleşen ve kullanılabilir (usable) olan günlük önbellek kayıtlarını toplar.
+    Toplanan ham uçuşları filtreleme aşamasından önce kesmez ([:max_results] uygulamaz);
+    böylece sonradan uygulanan direkt/saat/süre/bagaj filtreleri tüm toplanan uçuşları değerlendirir.
     Önceki bir aramanın verilerini asla yedek olarak kullanmaz.
     """
     cache_data = load_daily_cache(cache_path=cache_path)
@@ -316,6 +329,8 @@ def collect_search_state_from_daily_cache(
         "parse_error_queries": 0,
         "insufficient_scope_queries": 0,
         "missing_queries": 0,
+        "complete_scope_queries": 0,
+        "partial_scope_queries": 0,
         "incomplete_scope_notes": [],
     }
 
@@ -330,18 +345,32 @@ def collect_search_state_from_daily_cache(
             summary["usable_cached_queries"] += 1
             if status == QUERY_STATUS_NO_RESULTS:
                 summary["no_results_queries"] += 1
+                summary["complete_scope_queries"] += 1
             else:
                 summary["success_queries"] += 1
-                items = entry.get("flights", [])[:max_results]
+                items = entry.get("flights", [])
                 flights_objs = [FlightOption.from_dict(x) for x in items if x.get("currency", curr) == curr]
                 if direction == "OUT":
                     out_flights.extend(flights_objs)
                 else:
                     in_flights.extend(flights_objs)
-                if not entry.get("scope_complete", True):
+                if entry.get("scope_complete", False):
+                    summary["complete_scope_queries"] += 1
+                else:
+                    summary["partial_scope_queries"] += 1
                     summary["incomplete_scope_notes"].append(f"{orig}->{dest} ({d})")
         else:
-            if status == QUERY_STATUS_SUCCESS:
+            if status == QUERY_STATUS_SUCCESS and entry.get("schema_version") == 2:
+                summary["insufficient_scope_queries"] += 1
+                summary["partial_scope_queries"] += 1
+                summary["incomplete_scope_notes"].append(f"{orig}->{dest} ({d}) [düşük limit]")
+                items = entry.get("flights", [])
+                flights_objs = [FlightOption.from_dict(x) for x in items if x.get("currency", curr) == curr]
+                if direction == "OUT":
+                    out_flights.extend(flights_objs)
+                else:
+                    in_flights.extend(flights_objs)
+            elif status == QUERY_STATUS_SUCCESS:
                 summary["insufficient_scope_queries"] += 1
             elif status in (QUERY_STATUS_BLOCKED, QUERY_STATUS_TIMEOUT, QUERY_STATUS_PARSE_ERROR):
                 summary["failed_queries"] += 1
@@ -354,7 +383,7 @@ def collect_search_state_from_daily_cache(
             else:
                 summary["missing_queries"] += 1
 
-    has_data = summary["usable_cached_queries"] > 0
+    has_data = (summary["usable_cached_queries"] > 0) or (len(out_flights) > 0 or len(in_flights) > 0)
     needs_rescrape = (
         summary["missing_queries"] > 0
         or summary["failed_queries"] > 0
@@ -445,10 +474,15 @@ class FlightFinderHandler(SimpleHTTPRequestHandler):
 
         if route_path == "/api/cache/clear":
             try:
-                clear_daily_cache()
+                keep_today = True
+                if isinstance(body, dict) and "keep_today" in body:
+                    keep_today = bool(body.get("keep_today"))
+                counts = clear_daily_cache(keep_today=keep_today)
                 return self._send_json(
                     {
-                        "cached_queries": [],
+                        "cached_queries": get_today_cached_queries(),
+                        "removed_count": counts.get("removed_count", 0),
+                        "kept_count": counts.get("kept_count", 0),
                         "cache_error": get_last_cache_error(),
                     }
                 )
@@ -619,13 +653,21 @@ class FlightFinderHandler(SimpleHTTPRequestHandler):
         has_data: bool = cache_state["has_data"]
         q_summary = cache_state["query_summary"]
 
-        available_airlines = sorted(
+        available_out_airlines = sorted(
             {
                 f.airline.strip()
-                for f in (out_flights + in_flights)
+                for f in out_flights
                 if f.airline and f.airline.strip() and f.airline.strip() != "Doğrulanmadı"
             }
         )
+        available_in_airlines = sorted(
+            {
+                f.airline.strip()
+                for f in in_flights
+                if f.airline and f.airline.strip() and f.airline.strip() != "Doğrulanmadı"
+            }
+        )
+        available_airlines = sorted(set(available_out_airlines) | set(available_in_airlines))
 
         if not has_data:
             return self._send_json(
@@ -639,6 +681,8 @@ class FlightFinderHandler(SimpleHTTPRequestHandler):
                     "combinations_count": 0,
                     "combinations": [],
                     "available_airlines": [],
+                    "available_out_airlines": [],
+                    "available_in_airlines": [],
                     "outbound_flights": [],
                     "inbound_flights": [],
                     "query_summary": q_summary,
@@ -669,6 +713,8 @@ class FlightFinderHandler(SimpleHTTPRequestHandler):
             cabin_bag_fee=validated["cabin_bag_fee"],
             checked_bag_fee=validated["checked_bag_fee"],
             excluded_airlines=validated["excluded_airlines"],
+            out_excluded_airlines=validated["out_excluded_airlines"],
+            in_excluded_airlines=validated["in_excluded_airlines"],
             include_transfer=validated["include_transfer"],
             transfer_costs=validated["transfer_costs"],
             transfer_durations=validated["transfer_durations"],
@@ -677,8 +723,10 @@ class FlightFinderHandler(SimpleHTTPRequestHandler):
         if validated["only_asymmetric"] and not combos_df.empty:
             combos_df = combos_df[combos_df["is_asymmetric"]].reset_index(drop=True)
 
+        total_filtered_count = len(combos_df)
+        disp_limit = int(validated.get("display_limit", 250) or 250)
         combinations = (
-            sanitize_records_for_json(combos_df.head(250).to_dict(orient="records"))
+            sanitize_records_for_json(combos_df.head(disp_limit).to_dict(orient="records"))
             if not combos_df.empty
             else []
         )
@@ -691,9 +739,13 @@ class FlightFinderHandler(SimpleHTTPRequestHandler):
                 "currency": validated["currency"],
                 "outbound_count": len(out_flights),
                 "inbound_count": len(in_flights),
-                "combinations_count": len(combos_df),
+                "combinations_count": total_filtered_count,
+                "displayed_count": len(combinations),
+                "display_limit": disp_limit,
                 "combinations": combinations,
                 "available_airlines": available_airlines,
+                "available_out_airlines": available_out_airlines,
+                "available_in_airlines": available_in_airlines,
                 "outbound_flights": sanitize_records_for_json([f.to_dict() for f in out_flights]),
                 "inbound_flights": sanitize_records_for_json([f.to_dict() for f in in_flights]),
                 "query_summary": q_summary,

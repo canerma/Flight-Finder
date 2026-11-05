@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8" />
+  <title>Google Flights - Delayed More Flights Fixture</title>
+</head>
+<body>
+  <ul class="rk10dc" id="flightList">
+    <li class="pIav2d">
+      <div aria-label="Turkish Airlines ile 1 aktarma uçuş, Kalkış: 07:00, Varış: 12:30 aynı gün, Toplam süre 5 sa 30 dk, Fiyat: ₺6.200, TK 1901">
+        <span aria-label="Kalkış saati: 07:00">07:00</span>
+        <span aria-label="Varış saati: 12:30">12:30</span>
+        <div class="sSHqwe tPgKwe ogfYpf"><span>Turkish Airlines</span></div>
+        <div class="YMlIz FpEdX"><span>₺6.200</span></div>
+        <div class="gvkrdb AdWm1c tPgKwe ogfYpf">5 sa 30 dk</div>
+        <div class="EfT7Ae AdWm1c tPgKwe"><span class="ogfYpf">1 aktarma</span></div>
+      </div>
+    </li>
+    <li class="pIav2d">
+      <div aria-label="KLM ile 1 aktarma uçuş, Kalkış: 10:00, Varış: 15:00 aynı gün, Toplam süre 5 sa 0 dk, Fiyat: ₺5.800, KL 1610">
+        <span aria-label="Kalkış saati: 10:00">10:00</span>
+        <span aria-label="Varış saati: 15:00">15:00</span>
+        <div class="sSHqwe tPgKwe ogfYpf"><span>KLM</span></div>
+        <div class="YMlIz FpEdX"><span>₺5.800</span></div>
+        <div class="gvkrdb AdWm1c tPgKwe ogfYpf">5 sa 0 dk</div>
+        <div class="EfT7Ae AdWm1c tPgKwe"><span class="ogfYpf">1 aktarma</span></div>
+      </div>
+    </li>
+  </ul>
+
+  <button id="moreFlightsBtn" type="button" onclick="loadMoreFlights()">Daha fazla uçuş göster</button>
+
+  <script>
+    function loadMoreFlights() {
+      const params = new URLSearchParams(window.location.search);
+      const hang = params.get("hang") === "1";
+      if (hang) {
+        // Simulates a timeout where clicking the button does not load new cards and button remains
+        return;
+      }
+      setTimeout(() => {
+        const ul = document.getElementById("flightList");
+        const li = document.createElement("li");
+        li.className = "pIav2d";
+        li.innerHTML = `
+          <div aria-label="Pegasus ile Aktarmasız uçuş, Kalkış: 08:30, Varış: 11:30 aynı gün, Toplam süre 4 sa 0 dk, Fiyat: ₺2.950, Kabin bagajı dahil, PC 1250">
+            <span aria-label="Kalkış saati: 08:30">08:30</span>
+            <span aria-label="Varış saati: 11:30">11:30</span>
+            <div class="sSHqwe tPgKwe ogfYpf"><span>Pegasus</span></div>
+            <div class="YMlIz FpEdX"><span>₺2.950</span></div>
+            <div class="gvkrdb AdWm1c tPgKwe ogfYpf">4 sa 0 dk</div>
+            <div class="EfT7Ae AdWm1c tPgKwe"><span class="ogfYpf">Aktarmasız</span></div>
+          </div>
+        `;
+        ul.appendChild(li);
+        const btn = document.getElementById("moreFlightsBtn");
+        if (btn) btn.remove();
+        document.body.setAttribute("data-all-flights-loaded", "true");
+      }, 250);
+    }
+  </script>
+</body>
+</html>

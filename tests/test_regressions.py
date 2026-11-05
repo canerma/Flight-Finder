@@ -358,6 +358,83 @@ class SmartFlightFinderRegressionTests(unittest.TestCase):
         records = sanitize_records_for_json(df_all.to_dict(orient="records"))
         self.assertIsNone(records[0]["out_stops"])
 
+        # Sadece gidiş aktarmasız (out_max_stops=0, in_max_stops=None) seçildiğinde:
+        # Gidiş aktarmasız (0), dönüş 1 aktarmalı olan kombinasyon geçmeli!
+        out_direct = FlightOption(
+            origin="ESB",
+            destination="AMS",
+            date="2026-11-15",
+            airline="TestAir",
+            departure_time="10:00",
+            arrival_time="13:00",
+            duration="3 sa",
+            duration_minutes=180,
+            stops=0,
+            stops_text="Aktarmasız",
+            price=2000.0,
+            currency="TRY",
+            booking_url="https://example.com",
+            arrival_day_offset=0,
+            arrival_date="2026-11-15",
+        )
+        in_1stop = FlightOption(
+            origin="AMS",
+            destination="ESB",
+            date="2026-11-20",
+            airline="TestAir",
+            departure_time="15:00",
+            arrival_time="21:00",
+            duration="6 sa",
+            duration_minutes=360,
+            stops=1,
+            stops_text="1 aktarma",
+            price=1800.0,
+            currency="TRY",
+            booking_url="https://example.com",
+            arrival_day_offset=0,
+            arrival_date="2026-11-20",
+        )
+        df_out_only = build_combinations_dataframe(
+            outbound_flights=[out_direct, out_unknown_stops],
+            inbound_flights=[in_1stop],
+            min_stay_days=4,
+            max_stay_days=6,
+            window_start="2026-11-15",
+            window_end="2026-11-25",
+            expected_currency="TRY",
+            out_max_stops=0,
+            in_max_stops=None,
+        )
+        self.assertEqual(len(df_out_only), 1)
+        self.assertEqual(int(df_out_only.iloc[0]["out_stops"]), 0)
+        self.assertEqual(int(df_out_only.iloc[0]["in_stops"]), 1)
+
+        # Toplam seyahat süresi filtresi (max_total_travel_hours=8.0 -> 480 dk):
+        # 180 + 360 = 540 dk (9 saat) olduğu için 8 saat sınırında elenmeli, 10 saat sınırında geçmeli
+        df_total_8h = build_combinations_dataframe(
+            outbound_flights=[out_direct],
+            inbound_flights=[in_1stop],
+            min_stay_days=4,
+            max_stay_days=6,
+            window_start="2026-11-15",
+            window_end="2026-11-25",
+            expected_currency="TRY",
+            max_total_travel_hours=8.0,
+        )
+        self.assertTrue(df_total_8h.empty)
+
+        df_total_10h = build_combinations_dataframe(
+            outbound_flights=[out_direct],
+            inbound_flights=[in_1stop],
+            min_stay_days=4,
+            max_stay_days=6,
+            window_start="2026-11-15",
+            window_end="2026-11-25",
+            expected_currency="TRY",
+            max_total_travel_hours=10.0,
+        )
+        self.assertEqual(len(df_total_10h), 1)
+
     # 5. Bilinmeyen süre maksimum süre filtresinden geçmez ve en kısa uçuş gibi sıralanmaz
     def test_05_unknown_duration_and_departure_time_handling(self):
         out_unknown_dur = FlightOption(
@@ -786,6 +863,716 @@ class SmartFlightFinderRegressionTests(unittest.TestCase):
             fresh_flights,
         )
         self.assertIsNone(matched)
+
+    # 11. Olumsuz bagaj ifadesi yanlışlıkla ücretsiz bagaj sayılmaz ve çelişkili ifadeler None döner
+    def test_11_baggage_negation_and_conflict(self):
+        from scraper import extract_verified_baggage_flag
+
+        self.assertIs(extract_verified_baggage_flag("Kabin bagajı dahil değil", None), False)
+        self.assertIs(extract_verified_baggage_flag("Kabin bagajı dahil", None), True)
+        self.assertIs(extract_verified_baggage_flag("Sadece koltuk altı", None), False)
+        self.assertIsNone(extract_verified_baggage_flag("Pegasus ile direkt uçuş", None))
+        self.assertIsNone(
+            extract_verified_baggage_flag("Kabin bagajı dahil. Sadece koltuk altı çanta.", None)
+        )
+
+    # 12. Fiyat kontrolü farklı uçuş numarasını veya farklı aktarma/varış gününü kabul etmez, belirsiz kimliği ayırır
+    def test_12_recheck_flight_number_and_identity_matching(self):
+        cand_tk999 = FlightOption(
+            origin="ESB",
+            destination="AMS",
+            date="2026-11-15",
+            airline="Turkish Airlines",
+            departure_time="08:00",
+            arrival_time="11:00",
+            duration="4 sa",
+            duration_minutes=240,
+            stops=0,
+            stops_text="Aktarmasız",
+            price=4200.0,
+            currency="TRY",
+            booking_url="https://example.com",
+            arrival_day_offset=0,
+            arrival_date="2026-11-15",
+            flight_number="TK999",
+        )
+        # Seçili uçuş TK123 iken aday TK999 -> asla eşleşmemeli!
+        self.assertIsNone(
+            match_selected_flight(
+                {
+                    "origin": "ESB",
+                    "destination": "AMS",
+                    "date": "2026-11-15",
+                    "airline": "Turkish Airlines",
+                    "departure_time": "08:00",
+                    "arrival_time": "11:00",
+                    "arrival_date": "2026-11-15",
+                    "arrival_day_offset": 0,
+                    "stops": 0,
+                    "flight_number": "TK123",
+                },
+                [cand_tk999],
+            )
+        )
+
+        # Aynı uçuş numarası (TK123) ama farklı saat veya farklı varış tarihi -> eşleşmemeli!
+        cand_tk123_diff_time = FlightOption(
+            origin="ESB",
+            destination="AMS",
+            date="2026-11-15",
+            airline="Turkish Airlines",
+            departure_time="09:30",
+            arrival_time="12:30",
+            duration="4 sa",
+            duration_minutes=240,
+            stops=0,
+            stops_text="Aktarmasız",
+            price=4200.0,
+            currency="TRY",
+            booking_url="https://example.com",
+            arrival_day_offset=0,
+            arrival_date="2026-11-15",
+            flight_number="TK123",
+        )
+        self.assertIsNone(
+            match_selected_flight(
+                {
+                    "origin": "ESB",
+                    "destination": "AMS",
+                    "date": "2026-11-15",
+                    "airline": "Turkish Airlines",
+                    "departure_time": "08:00",
+                    "arrival_time": "11:00",
+                    "arrival_date": "2026-11-15",
+                    "arrival_day_offset": 0,
+                    "stops": 0,
+                    "flight_number": "TK123",
+                },
+                [cand_tk123_diff_time],
+            )
+        )
+
+        # Farklı aktarma havalimanı / segmenti olan uçuş aynı toplam saatlerde olsa da eşleşmemeli!
+        cand_saw = FlightOption(
+            origin="ESB",
+            destination="AMS",
+            date="2026-11-15",
+            airline="AJet",
+            departure_time="08:00",
+            arrival_time="14:00",
+            duration="7 sa",
+            duration_minutes=420,
+            stops=1,
+            stops_text="1 aktarma",
+            price=3500.0,
+            currency="TRY",
+            booking_url="https://example.com",
+            arrival_day_offset=0,
+            arrival_date="2026-11-15",
+            layover_airports=["SAW"],
+            segments=["VF101", "VF102"],
+        )
+        self.assertIsNone(
+            match_selected_flight(
+                {
+                    "origin": "ESB",
+                    "destination": "AMS",
+                    "date": "2026-11-15",
+                    "airline": "AJet",
+                    "departure_time": "08:00",
+                    "arrival_time": "14:00",
+                    "arrival_date": "2026-11-15",
+                    "arrival_day_offset": 0,
+                    "stops": 1,
+                    "layover_airports": ["IST"],
+                    "segments": ["VF201", "VF202"],
+                },
+                [cand_saw],
+            )
+        )
+
+        # Aynı uçuş numarası (TK123) ve aynı saatler fakat farklı varış tarihi (+1 gün) -> eşleşmemeli!
+        cand_tk123_diff_arr_day = FlightOption(
+            origin="ESB",
+            destination="AMS",
+            date="2026-11-15",
+            airline="Turkish Airlines",
+            departure_time="23:00",
+            arrival_time="02:00",
+            duration="4 sa",
+            duration_minutes=240,
+            stops=0,
+            stops_text="Aktarmasız",
+            price=4200.0,
+            currency="TRY",
+            booking_url="https://example.com",
+            arrival_day_offset=1,
+            arrival_date="2026-11-16",
+            flight_number="TK123",
+        )
+        self.assertIsNone(
+            match_selected_flight(
+                {
+                    "origin": "ESB",
+                    "destination": "AMS",
+                    "date": "2026-11-15",
+                    "airline": "Turkish Airlines",
+                    "departure_time": "23:00",
+                    "arrival_time": "02:00",
+                    "arrival_date": "2026-11-15",
+                    "arrival_day_offset": 0,
+                    "stops": 0,
+                    "flight_number": "TK123",
+                },
+                [cand_tk123_diff_arr_day],
+            )
+        )
+
+        # Kimliği doğrulanan aynı uçuşun fiyatı değişirse doğru eşleşir ve fiyat farkı doğru hesaplanır
+        from scraper import evaluate_selected_flight_match
+
+        cand_tk123_new_price = FlightOption(
+            origin="ESB",
+            destination="AMS",
+            date="2026-11-15",
+            airline="Turkish Airlines",
+            departure_time="08:00",
+            arrival_time="11:00",
+            duration="4 sa",
+            duration_minutes=240,
+            stops=0,
+            stops_text="Aktarmasız",
+            price=4500.0,
+            currency="TRY",
+            booking_url="https://example.com",
+            arrival_day_offset=0,
+            arrival_date="2026-11-15",
+            flight_number="TK123",
+        )
+        status_ok, matched_ok, _ = evaluate_selected_flight_match(
+            {
+                "origin": "ESB",
+                "destination": "AMS",
+                "date": "2026-11-15",
+                "airline": "Turkish Airlines",
+                "departure_time": "08:00",
+                "arrival_time": "11:00",
+                "arrival_date": "2026-11-15",
+                "arrival_day_offset": 0,
+                "stops": 0,
+                "price": 4000.0,
+                "flight_number": "TK123",
+            },
+            [cand_tk123_new_price],
+        )
+        self.assertEqual(status_ok, "matched")
+        self.assertIsNotNone(matched_ok)
+        self.assertAlmostEqual(matched_ok.price - 4000.0, 500.0)
+
+        # Kimliği yetersiz/belirsiz aday (ör. aktarmalı uçuşta ne uçuş no ne aktarma havalimanı/segmenti var)
+        # kesin doğrulanmış sayılmaz -> identity_unverified döner!
+        cand_ambig_conn = FlightOption(
+            origin="ESB",
+            destination="AMS",
+            date="2026-11-15",
+            airline="AJet",
+            departure_time="08:00",
+            arrival_time="14:00",
+            duration="7 sa",
+            duration_minutes=420,
+            stops=1,
+            stops_text="1 aktarma",
+            price=3500.0,
+            currency="TRY",
+            booking_url="https://example.com",
+            arrival_day_offset=0,
+            arrival_date="2026-11-15",
+            flight_number=None,
+            layover_airports=[],
+            segments=[],
+        )
+        status_ambig, matched_ambig, _ = evaluate_selected_flight_match(
+            {
+                "origin": "ESB",
+                "destination": "AMS",
+                "date": "2026-11-15",
+                "airline": "AJet",
+                "departure_time": "08:00",
+                "arrival_time": "14:00",
+                "arrival_date": "2026-11-15",
+                "arrival_day_offset": 0,
+                "stops": 1,
+            },
+            [cand_ambig_conn],
+        )
+        self.assertEqual(status_ambig, "identity_unverified")
+        self.assertIsNone(matched_ambig)
+
+    # 13. Varış günü ayrıştırması "ertesi gün", "next day", "+2", açık aynı gün ve belirsizliği doğru işler
+    def test_13_arrival_day_offset_parsing_and_uncertainty(self):
+        from scraper import parse_time_and_day_offset, compute_arrival_date
+
+        # Türkçe "ertesi gün" -> +1
+        _, _, off_tr = parse_time_and_day_offset("23:00", "02:00", "23:00 02:00 ertesi gün", "")
+        self.assertEqual(off_tr, 1)
+
+        # İngilizce "next day" -> +1
+        _, _, off_en = parse_time_and_day_offset("23:00", "02:00", "23:00 02:00 next day", "")
+        self.assertEqual(off_en, 1)
+
+        # +2 -> iki gün sonrası
+        _, _, off_p2 = parse_time_and_day_offset("22:00", "05:00+2", "22:00 05:00+2", "")
+        self.assertEqual(off_p2, 2)
+
+        # Açıkça doğrulanan aynı gün -> 0
+        _, _, off_same = parse_time_and_day_offset("08:00", "11:00", "Kalkış: 08:00, Varış: 11:00", "")
+        self.assertEqual(off_same, 0)
+
+        # Gün farkı doğrulanamıyorsa (ör. 23:00 -> 02:00 ama hiçbir gün işareti yok veya ayrıştırılamayan '+4' işareti) -> None
+        _, _, off_ambig = parse_time_and_day_offset("23:00", "02:00", "23:00 02:00", "")
+        self.assertIsNone(off_ambig)
+        _, _, off_unparseable = parse_time_and_day_offset("08:00", "11:00+4", "08:00 11:00+4", "")
+        self.assertIsNone(off_unparseable)
+
+        # 1 Aralık kalkış, "ertesi gün" (+1) ile 2 Aralık varış, 6 Aralık dönüş -> 4 gece
+        arr_date_dec2 = compute_arrival_date("2026-12-01", off_tr)
+        self.assertEqual(arr_date_dec2, "2026-12-02")
+        out_dec1 = FlightOption(
+            origin="ESB",
+            destination="AMS",
+            date="2026-12-01",
+            airline="Pegasus",
+            departure_time="23:00",
+            arrival_time="02:00",
+            duration="4 sa",
+            duration_minutes=240,
+            stops=0,
+            stops_text="Aktarmasız",
+            price=2900.0,
+            currency="TRY",
+            booking_url="https://example.com",
+            arrival_day_offset=off_tr,
+            arrival_date=arr_date_dec2,
+        )
+        in_dec6 = FlightOption(
+            origin="AMS",
+            destination="ESB",
+            date="2026-12-06",
+            airline="Pegasus",
+            departure_time="15:00",
+            arrival_time="19:00",
+            duration="4 sa",
+            duration_minutes=240,
+            stops=0,
+            stops_text="Aktarmasız",
+            price=3100.0,
+            currency="TRY",
+            booking_url="https://example.com",
+            arrival_day_offset=0,
+            arrival_date="2026-12-06",
+        )
+        df_stay = build_combinations_dataframe(
+            outbound_flights=[out_dec1],
+            inbound_flights=[in_dec6],
+            min_stay_days=4,
+            max_stay_days=4,
+            window_start="2026-12-01",
+            window_end="2026-12-08",
+            expected_currency="TRY",
+        )
+        self.assertEqual(len(df_stay), 1)
+        self.assertEqual(int(df_stay.iloc[0]["stay_days"]), 4)
+
+    # 14. Filtre uygulanmadan önce sonuçlar kesilmez (9. sıradaki direkt/uygun uçuş korunur)
+    def test_14_no_premature_slicing_before_filters(self):
+        epoch = get_cache_epoch()
+        # İlk 8 uçuş 1 aktarmalı, 05:00 kalkışlı ve 9 saat süreli; 9. uçuş direkt (stops=0), 10:00 kalkışlı ve 3.5 saat süreli
+        out_flights_9 = [
+            FlightOption(
+                origin="ESB",
+                destination="AMS",
+                date="2026-11-15",
+                airline=f"StopAir{i}",
+                departure_time="05:00",
+                arrival_time="14:00",
+                duration="9 sa",
+                duration_minutes=540,
+                stops=1,
+                stops_text="1 aktarma",
+                price=2000.0 + i * 50,
+                currency="TRY",
+                booking_url="https://example.com",
+                arrival_day_offset=0,
+                arrival_date="2026-11-15",
+            )
+            for i in range(8)
+        ] + [
+            FlightOption(
+                origin="ESB",
+                destination="AMS",
+                date="2026-11-15",
+                airline="DirectAir9",
+                departure_time="10:00",
+                arrival_time="13:30",
+                duration="3 sa 30 dk",
+                duration_minutes=210,
+                stops=0,
+                stops_text="Aktarmasız",
+                price=3200.0,
+                currency="TRY",
+                booking_url="https://example.com",
+                arrival_day_offset=0,
+                arrival_date="2026-11-15",
+            )
+        ]
+        in_flight = FlightOption(
+            origin="AMS",
+            destination="ESB",
+            date="2026-11-20",
+            airline="DirectReturn",
+            departure_time="14:00",
+            arrival_time="18:00",
+            duration="4 sa",
+            duration_minutes=240,
+            stops=0,
+            stops_text="Aktarmasız",
+            price=3000.0,
+            currency="TRY",
+            booking_url="https://example.com",
+            arrival_day_offset=0,
+            arrival_date="2026-11-20",
+        )
+        update_single_cache_entry(
+            _cache_key("ESB", "AMS", "2026-11-15", "TRY"),
+            RouteQueryResult(
+                origin="ESB",
+                destination="AMS",
+                date="2026-11-15",
+                currency="TRY",
+                status="success",
+                flights=out_flights_9,
+                requested_limit=20,
+                collected_count=9,
+                total_dom_cards=9,
+                scope_complete=True,
+                scope_note="OK",
+                fetched_at="2026-11-05T12:00:00",
+            ).to_cache_entry(),
+            expected_epoch=epoch,
+        )
+        update_single_cache_entry(
+            _cache_key("AMS", "ESB", "2026-11-20", "TRY"),
+            RouteQueryResult(
+                origin="AMS",
+                destination="ESB",
+                date="2026-11-20",
+                currency="TRY",
+                status="success",
+                flights=[in_flight],
+                requested_limit=20,
+                collected_count=1,
+                total_dom_cards=1,
+                scope_complete=True,
+                scope_note="OK",
+                fetched_at="2026-11-05T12:00:00",
+            ).to_cache_entry(),
+            expected_epoch=epoch,
+        )
+
+        httpd, base_url = self._start_test_http_server()
+        try:
+            # 14a: max_results_per_route=8 olsa bile önbellekteki 9. uçuş direkt filtrede (max_stops=0) kaybolmamalı!
+            req_direct = Request(
+                f"{base_url}/api/combine",
+                data=json.dumps(
+                    {
+                        "home_airport": "ESB",
+                        "target_airports": ["AMS"],
+                        "window_start": "2026-11-15",
+                        "window_end": "2026-11-20",
+                        "min_stay_days": 4,
+                        "max_stay_days": 6,
+                        "currency": "TRY",
+                        "max_results_per_route": 8,
+                        "max_stops": 0,
+                    }
+                ).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urlopen(req_direct) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                self.assertEqual(data["combinations_count"], 1)
+                self.assertEqual(data["combinations"][0]["out_airline"], "DirectAir9")
+
+            # 14b: Kalkış saati filtresi (09:00-12:00) ve maksimum uçuş süresi filtresi (5 saat) için de 9. uçuş bulunur
+            req_time_dur = Request(
+                f"{base_url}/api/combine",
+                data=json.dumps(
+                    {
+                        "home_airport": "ESB",
+                        "target_airports": ["AMS"],
+                        "window_start": "2026-11-15",
+                        "window_end": "2026-11-20",
+                        "min_stay_days": 4,
+                        "max_stay_days": 6,
+                        "currency": "TRY",
+                        "max_results_per_route": 8,
+                        "out_dep_min_time": "09:00",
+                        "out_dep_max_time": "12:00",
+                        "max_flight_hours": 5.0,
+                    }
+                ).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urlopen(req_time_dur) as resp:
+                data_td = json.loads(resp.read().decode("utf-8"))
+                self.assertEqual(data_td["combinations_count"], 1)
+                self.assertEqual(data_td["combinations"][0]["out_airline"], "DirectAir9")
+
+            # 14c: Görüntüleme limiti (display_limit=3) filtrelerden SONRA uygulanır
+            req_disp = Request(
+                f"{base_url}/api/combine",
+                data=json.dumps(
+                    {
+                        "home_airport": "ESB",
+                        "target_airports": ["AMS"],
+                        "window_start": "2026-11-15",
+                        "window_end": "2026-11-20",
+                        "min_stay_days": 4,
+                        "max_stay_days": 6,
+                        "currency": "TRY",
+                        "max_results_per_route": 8,
+                        "display_limit": 3,
+                    }
+                ).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urlopen(req_disp) as resp:
+                data_disp = json.loads(resp.read().decode("utf-8"))
+                self.assertEqual(data_disp["combinations_count"], 9)
+                self.assertEqual(len(data_disp["combinations"]), 3)
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+
+    # 15. "Daha fazla uçuş" butonuna basıldıktan sonra asenkron yüklenen kartlar beklenir ve toplanır
+    def test_15_more_flights_async_expansion_and_scope(self):
+        import asyncio
+        from playwright.async_api import async_playwright
+        from scraper import _extract_query_result_from_page, _launch_browser
+
+        fixture_url = (FIXTURES_DIR / "delayed_more_flights.html").resolve().as_uri()
+
+        async def _run_fixture_checks():
+            async with async_playwright() as p:
+                browser = await _launch_browser(p, headless=True)
+                context = await browser.new_context()
+                page = await context.new_page()
+                await page.goto(fixture_url)
+                res_expanded = await _extract_query_result_from_page(
+                    page=page,
+                    origin="ESB",
+                    destination="AMS",
+                    date_str="2026-11-15",
+                    currency="TRY",
+                    booking_url=fixture_url,
+                    requested_limit=10,
+                )
+                await page.goto(fixture_url + "?hang=1")
+                res_hang = await _extract_query_result_from_page(
+                    page=page,
+                    origin="ESB",
+                    destination="AMS",
+                    date_str="2026-11-15",
+                    currency="TRY",
+                    booking_url=fixture_url,
+                    requested_limit=10,
+                )
+                await context.close()
+                await browser.close()
+                return res_expanded, res_hang
+
+        res_expanded, res_hang = asyncio.run(_run_fixture_checks())
+        # Gecikmeli eklenen 3. uçuş (2950 TRY Pegasus) toplanmış ve en ucuz olarak 1. sıraya yerleşmiş olmalı
+        self.assertEqual(len(res_expanded.flights), 3)
+        self.assertEqual(res_expanded.flights[0].price, 2950.0)
+        self.assertTrue(res_expanded.scope_complete)
+
+        # Hang durumunda buton hâlâ sayfada olduğu ve yeni kartlar yüklenemediği için scope_complete=False olmalı
+        self.assertEqual(len(res_hang.flights), 2)
+        self.assertFalse(res_hang.scope_complete)
+
+    # 16. 48 saat önbellek süresi, bugün hariç temizleme ve gidiş/dönüş ayrı havayolu filtreleri
+    def test_16_cache_48h_ttl_keep_today_and_separate_airline_filters(self):
+        from datetime import datetime, timedelta
+        from scraper import save_daily_cache, clear_daily_cache, load_daily_cache
+
+        now_dt = datetime.now()
+        today_iso = now_dt.isoformat(timespec="seconds")
+        yesterday_iso = (now_dt - timedelta(hours=24)).isoformat(timespec="seconds")
+        expired_iso = (now_dt - timedelta(hours=60)).isoformat(timespec="seconds")
+
+        today_day = now_dt.strftime("%Y-%m-%d")
+        yesterday_day = (now_dt - timedelta(hours=24)).strftime("%Y-%m-%d")
+        expired_day = (now_dt - timedelta(hours=60)).strftime("%Y-%m-%d")
+
+        raw_cache = {
+            "schema_version": 2,
+            "date": today_day,
+            "entries": {
+                "ESB|AMS|2026-11-15|TRY": {
+                    "schema_version": 2,
+                    "origin": "ESB",
+                    "destination": "AMS",
+                    "date": "2026-11-15",
+                    "currency": "TRY",
+                    "status": "success",
+                    "flights": [],
+                    "requested_limit": 8,
+                    "collected_count": 0,
+                    "total_dom_cards": 0,
+                    "scope_complete": True,
+                    "fetched_at": today_iso,
+                    "cached_date": today_day,
+                },
+                "ESB|DUS|2026-11-15|TRY": {
+                    "schema_version": 2,
+                    "origin": "ESB",
+                    "destination": "DUS",
+                    "date": "2026-11-15",
+                    "currency": "TRY",
+                    "status": "success",
+                    "flights": [],
+                    "requested_limit": 8,
+                    "collected_count": 0,
+                    "total_dom_cards": 0,
+                    "scope_complete": True,
+                    "fetched_at": yesterday_iso,
+                    "cached_date": yesterday_day,
+                },
+                "ESB|CGN|2026-11-15|TRY": {
+                    "schema_version": 2,
+                    "origin": "ESB",
+                    "destination": "CGN",
+                    "date": "2026-11-15",
+                    "currency": "TRY",
+                    "status": "success",
+                    "flights": [],
+                    "requested_limit": 8,
+                    "collected_count": 0,
+                    "total_dom_cards": 0,
+                    "scope_complete": True,
+                    "fetched_at": expired_iso,
+                    "cached_date": expired_day,
+                },
+            },
+        }
+        save_daily_cache(raw_cache)
+
+        # 48 saatlik TTL: Bugünkü ve 24 saat önceki (dünkü) kayıt korunmalı, 60 saat önceki silinmeli
+        loaded = load_daily_cache()
+        self.assertIn("ESB|AMS|2026-11-15|TRY", loaded["entries"])
+        self.assertIn("ESB|DUS|2026-11-15|TRY", loaded["entries"])
+        self.assertNotIn("ESB|CGN|2026-11-15|TRY", loaded["entries"])
+
+        # Bugün hariç sil (keep_today=True): Dünkü kayıt silinmeli, bugünkü kayıt kalmalı
+        clear_res = clear_daily_cache(keep_today=True)
+        self.assertEqual(clear_res["removed_count"], 1)
+        self.assertEqual(clear_res["kept_count"], 1)
+        after_clear = load_daily_cache()
+        self.assertIn("ESB|AMS|2026-11-15|TRY", after_clear["entries"])
+        self.assertNotIn("ESB|DUS|2026-11-15|TRY", after_clear["entries"])
+
+        # Gidiş ve Dönüş ayrı havayolu filtreleri
+        out_flights = [
+            FlightOption(
+                origin="ESB",
+                destination="AMS",
+                date="2026-11-15",
+                airline="Pegasus",
+                departure_time="08:00",
+                arrival_time="11:00",
+                duration="4 sa",
+                duration_minutes=240,
+                stops=0,
+                stops_text="Aktarmasız",
+                price=3000.0,
+                currency="TRY",
+                booking_url="https://example.com",
+                arrival_day_offset=0,
+                arrival_date="2026-11-15",
+            ),
+            FlightOption(
+                origin="ESB",
+                destination="AMS",
+                date="2026-11-15",
+                airline="SunExpress",
+                departure_time="10:00",
+                arrival_time="13:00",
+                duration="4 sa",
+                duration_minutes=240,
+                stops=0,
+                stops_text="Aktarmasız",
+                price=3500.0,
+                currency="TRY",
+                booking_url="https://example.com",
+                arrival_day_offset=0,
+                arrival_date="2026-11-15",
+            ),
+        ]
+        in_flights = [
+            FlightOption(
+                origin="AMS",
+                destination="ESB",
+                date="2026-11-20",
+                airline="Pegasus",
+                departure_time="14:00",
+                arrival_time="19:00",
+                duration="4 sa",
+                duration_minutes=240,
+                stops=0,
+                stops_text="Aktarmasız",
+                price=3200.0,
+                currency="TRY",
+                booking_url="https://example.com",
+                arrival_day_offset=0,
+                arrival_date="2026-11-20",
+            ),
+            FlightOption(
+                origin="AMS",
+                destination="ESB",
+                date="2026-11-20",
+                airline="Turkish Airlines",
+                departure_time="16:00",
+                arrival_time="21:00",
+                duration="4 sa",
+                duration_minutes=240,
+                stops=0,
+                stops_text="Aktarmasız",
+                price=4000.0,
+                currency="TRY",
+                booking_url="https://example.com",
+                arrival_day_offset=0,
+                arrival_date="2026-11-20",
+            ),
+        ]
+
+        # Gidişte Pegasus hariç, Dönüşte serbest -> Gidiş sadece SunExpress, Dönüş Pegasus veya THY olabilir
+        df_sep = build_combinations_dataframe(
+            outbound_flights=out_flights,
+            inbound_flights=in_flights,
+            min_stay_days=5,
+            max_stay_days=5,
+            out_excluded_airlines=["Pegasus"],
+            in_excluded_airlines=["Turkish Airlines"],
+            window_end="2026-11-25",
+        )
+        self.assertEqual(len(df_sep), 1)
+        self.assertEqual(df_sep.iloc[0]["out_airline"], "SunExpress")
+        self.assertEqual(df_sep.iloc[0]["in_airline"], "Pegasus")
 
 
 if __name__ == "__main__":

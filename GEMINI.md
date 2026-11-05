@@ -10,23 +10,26 @@
 2. **Ayrık Tek Yön (Decoupled One-Way) Kombinasyon ve Gece Hesabı:**
    - Gidiş ve dönüş rotaları **tek yön** olarak bağımsız taranır (`Kalkış -> Hedef Havalimanları` ve `Hedef Havalimanları -> Kalkış`, karşı tarafta en fazla 3 benzersiz hedef havalimanı).
    - Kullanıcı tek bir **Seyahat Tarih Aralığı** (`En Erken Gidiş` – `Eve En Geç Varış`) ve **Hedefte Kalış Süresi (Gece)** (`min_stay` – `max_stay`) seçer.
-   - **Gece Sayısı Hesabı:** Hedefte kalış gecesi (`stay_days`), gidiş uçuşunun **hedefe varış yerel tarihi** (`out_arrival_date`) ile dönüş uçuşunun **kalkış yerel tarihi** (`in_date`) arasındaki gün farkı olarak hesaplanır (`+1` / `+2` gün farkları dikkate alınır; ör. 1 Aralık kalkış, 2 Aralık hedefe varış, 6 Aralık dönüş = **4 gece**).
+   - **Gece Sayısı Hesabı:** Hedefte kalış gecesi (`stay_days`), gidiş uçuşunun **hedefe varış yerel tarihi** (`out_arrival_date`) ile dönüş uçuşunun **kalkış yerel tarihi** (`in_date`) arasındaki gün farkı olarak hesaplanır (`+1` / `+2` / `"ertesi gün"` / `"next day"` gün farkları varış alanına bağlanarak ayrıştırılır; ör. 1 Aralık kalkış, 2 Aralık hedefe varış, 6 Aralık dönüş = **4 gece**).
    - **Dönüş Varış Kontrolü:** Dönüş uçuşunun kalkış havalimanına varış yerel tarihi (`in_arrival_date`), seyahat penceresinin son gününü (`window_end`) aşamaz.
-   - Doğrulanamayan varış tarihleri sessizce aynı gün kabul edilmez; kombinasyondan elenir.
-3. **Sorgu Durumları ve Günlük Kalıcı Önbellek (`flight_cache.json`, Şema v2):**
+   - Doğrulanamayan varış tarihleri veya yalnızca saat küçüklüğünden (`23:00 -> 02:00` açık gün işareti olmadan) kaynaklanan belirsizlikler sessizce aynı gün veya `+1` kabul edilmez; `None` bırakılır ve kombinasyondan elenir.
+3. **Sorgu Durumları, Kapsam Takibi ve 48 Saatlik Kalıcı Önbellek (`flight_cache.json`, Şema v2):**
+   - Önbellek kayıtları **48 saat (`CACHE_TTL_HOURS = 48`)** boyunca geçerlidir. Arayüzdeki **"🧹 Önbelleği Temizle (Bugün Hariç Sil)"** butonu (`keep_today=True`), içinde bulunduğumuz gün (`_today_str()`) yapılan sorguları koruyup önceki günlere ait önbellek kayıtlarını temizler.
    - Her `(origin, destination, date, currency)` sorgusu açık bir durumla kaydedilir: `success`, `no_results`, `timeout`, `blocked`, `parse_error`.
    - `no_results` durumu yalnızca sayfada gerçek "uçuş bulunamadı" mesajı doğrulandığında atanır. Hatalı sorgular (`timeout`, `blocked`, `parse_error`) asla geçerli boş sonuç gibi önbellekten sunulmaz.
-   - Önbellek kayıtları `schema_version`, `requested_limit`, `collected_count`, `total_dom_cards`, `scope_complete` ve `fetched_at` metaverilerini içerir. Daha yüksek `max_results_per_route` istendiğinde düşük kapsamlı eski önbellek yeterli kabul edilmez ve yeniden taranır.
+   - `"Daha fazla uçuş"` genişletmesi tıklama ve kart okuma adımlarını ayırır; yeni kartların DOM'a eklenmesini sınırlı zaman aşımıyla bekler.
+   - Önbellek kayıtları `schema_version`, `requested_limit`, `collected_count`, `total_dom_cards`, `limit_reached`, `all_loaded_parsed`, `scope_complete` ve `fetched_at` metaverilerini içerir. `scope_complete` yalnızca genişletme zaman aşımına uğramadığında, sayfada yüklenmemiş ek uçuş butonu kalmadığında ve yüklenen tüm kartlar ayrıştırıldığında `True` olur.
+   - Toplanan ham uçuşlar filtreleme aşamasından önce kesilmez (`[:max_results]` uygulanmaz); tüm toplanan uçuşlar filtreleme aşamasına (`build_combinations_dataframe`) aktarılır ve görüntüleme limiti (`display_limit`) filtreleme + sıralama sonrasında uygulanır.
    - Önbellek yazımı geçici dosya + `os.replace` ile atomik yapılır ve `_CACHE_EPOCH` sayacı sayesinde tarama sürerken yapılan önbellek temizliği eski verilerin geri yazılmasını engeller.
-4. **Eksik Bilginin Doğru Bilgi Gibi Kullanılmaması (Nullable Modelleme):**
+4. **Eksik Bilginin Doğru Bilgi Gibi Kullanılmaması (Nullable Modelleme) ve Bağımsız Bacak Filtreleri:**
    - Okunamayan `stops`, `duration_minutes`, `departure_time`, `arrival_time`, `arrival_day_offset` ve `cabin_baggage_included` alanları `None` (`null`) olarak modellenir ve arayüzde `"Doğrulanmadı"` olarak gösterilir.
-   - Aktarma filtresi (`max_stops`), maksimum süre filtresi (`max_flight_hours`), kalkış saati filtresi ve `"Ücretsiz kabin bagajı"` filtresi aktifken ilgili alanı doğrulanmamış (`None`) uçuşlar filtreden geçirilmez.
+   - Aktarma filtresi (`max_stops`, `out_max_stops`, `in_max_stops`), gidiş ve dönüş için ayrı havayolu filtreleri (`out_excluded_airlines`, `in_excluded_airlines`), maksimum bacak/toplam seyahat süresi filtresi (`max_flight_hours`, `max_total_travel_hours`), kalkış saati filtresi ve `"Ücretsiz kabin bagajı"` filtresi aktifken ilgili alanı doğrulanmamış (`None`) uçuşlar filtreden geçirilmez.
    - Süresi bilinmeyen uçuşlar `0 dk` gösterilmez ve en kısa uçuş gibi en üste sıralanmaz (`na_position="last"`).
 5. **Bagaj ve Kara Ulaşımı (Transfer) Tahmini:**
-   - Havayolu adına bakılarak otomatik `"8 kg kabin ücretsiz"` veya `"sadece koltuk altı"` varsayımı yapılmaz; yalnızca teklif metninden doğrulanırsa işaretlenir, aksi halde `"Bilinmiyor (Doğrulanmadı)"` gösterilir.
+   - Havayolu adına bakılarak otomatik `"8 kg kabin ücretsiz"` veya `"sadece koltuk altı"` varsayımı yapılmaz; yalnızca teklif metninden doğrulanırsa işaretlenir. Olumsuz ifadeler (`"Kabin bagajı dahil değil"`, `"Sadece koltuk altı"`) önce yakalanıp maskelenir; bağımsız olumlu ve olumsuz ifadeler çelişirse veya bilgi yoksa `None` (`"Bilinmiyor (Doğrulanmadı)"`) döndürülür.
    - Sabit kur varsayımı yoktur; kullanıcı arayüzden manuel döviz kuru (`1 EUR -> TRY/USD`) ve tahmini transfer/bagaj ücretlerini düzenleyebilir. Eksik transfer maliyeti sessizce `0` kabul edilmez.
 6. **Seçili Kombinasyonu Yeniden Kontrol Etme ve Bağlantılar:**
-   - Sonuç kartlarındaki **"🔄 Fiyatı Yeniden Kontrol Et"** butonu (`/api/recheck`), yalnızca seçili gidiş ve dönüş rota/gününü önbelleği atlayarak yeniden tarar ve aynı uçuşun güncel fiyatını/bulunabilirliğini kontrol eder (başka uçuşun fiyatını seçili uçuşa yazmaz).
+   - Sonuç kartlarındaki **"🔄 Fiyatı Yeniden Kontrol Et"** butonu (`/api/recheck`), yalnızca seçili gidiş ve dönüş rota/gününü önbelleği atlayarak yeniden tarar. Uçuş numarası (`flight_number`), kalkış/varış saatleri, varış yerel tarihi (`arrival_date` / `arrival_day_offset`), aktarma sayısı (`stops`), sıralı segmentler (`segments`) ve aktarma havalimanları (`layover_airports`) birlikte doğrulanır. Farklı uçuş numaraları veya farklı varış günleri asla eşleştirilmez; kimlik bilgisi yetersiz veya belirsizse `"identity_unverified"` (`"Uçuş kimliği doğrulanamadı"`) durumu döndürülür.
    - Uygulama doğrudan bilet satışı yapmaz; bağlantılar **"Google Flights'ta Aramayı Aç ↗"** olarak etiketlenir ve sonuçların iki bağımsız tek yön teklifin toplamı olduğu açıkça belirtilir.
 7. **Git / GitHub Senkronizasyon Kuralı:**
    - GitHub uzak deposuna (`https://github.com/canerma/Flight-Finder.git`) otomatik `git commit` / `git push` yapılmaz.

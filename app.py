@@ -227,7 +227,6 @@ if scrape_btn:
                 max_results_per_route=max_results_per_route,
                 max_concurrent_pages=max_concurrent_pages,
                 headless=headless_mode,
-                only_retry_failed=only_retry_failed,
                 progress_callback=update_progress,
             )
 
@@ -237,11 +236,11 @@ if scrape_btn:
         st.session_state.last_stats = stats
         progress_bar.empty()
 
-        if stats.get("failed_queries", 0) > 0:
+        if stats.get("failed", 0) > 0:
             st.warning(
-                f"Kısmi sonuç: {stats.get('success_queries', 0)} başarılı, "
-                f"{stats.get('no_results_queries', 0)} uçuş yok, "
-                f"{stats.get('failed_queries', 0)} hatalı sorgu."
+                f"Kısmi sonuç: {stats.get('success', 0)} başarılı, "
+                f"{stats.get('no_results', 0)} uçuş yok, "
+                f"{stats.get('failed', 0)} hatalı sorgu."
             )
         else:
             st.success(

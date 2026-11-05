@@ -137,9 +137,12 @@ def build_combinations_dataframe(
     cabin_bag_fee: float = 0.0,
     checked_bag_fee: float = 0.0,
     excluded_airlines: Optional[List[str]] = None,
+    out_excluded_airlines: Optional[List[str]] = None,
+    in_excluded_airlines: Optional[List[str]] = None,
     include_transfer: bool = False,
     transfer_costs: Optional[Dict[str, float]] = None,
     transfer_durations: Optional[Dict[str, int]] = None,
+    display_limit: Optional[int] = None,
 ) -> pd.DataFrame:
     """
     Ayrık tek yön gidiş (outbound) ve dönüş (inbound) uçuşlarını kartezyen çarpımla birleştirir.
@@ -233,12 +236,15 @@ def build_combinations_dataframe(
             in_dep_mins.notna() & (in_dep_mins >= in_min_val) & (in_dep_mins <= in_max_val)
         ]
 
-    # 4) Hariç tutulan havayolları filtresi
-    if excluded_airlines:
-        excl_set = {a.strip().lower() for a in excluded_airlines if a and a.strip()}
-        if excl_set:
-            df_out = df_out[~df_out["airline"].astype(str).str.lower().isin(excl_set)]
-            df_in = df_in[~df_in["airline"].astype(str).str.lower().isin(excl_set)]
+    # 4) Hariç tutulan havayolları filtresi (gidiş ve dönüş ayrı veya ortak)
+    common_excl = {a.strip().lower() for a in (excluded_airlines or []) if a and str(a).strip()}
+    out_excl = common_excl | {a.strip().lower() for a in (out_excluded_airlines or []) if a and str(a).strip()}
+    in_excl = common_excl | {a.strip().lower() for a in (in_excluded_airlines or []) if a and str(a).strip()}
+
+    if out_excl:
+        df_out = df_out[~df_out["airline"].astype(str).str.lower().isin(out_excl)]
+    if in_excl:
+        df_in = df_in[~df_in["airline"].astype(str).str.lower().isin(in_excl)]
 
     # 5) "Ücretsiz kabin bagajı" filtresinden YALNIZCA gerçek tekliften doğrulanmış (True) olanlar geçer
     if baggage_mode == "free_cabin_only":
@@ -420,5 +426,9 @@ def build_combinations_dataframe(
         ascending=[True, True],
         na_position="last",
     ).reset_index(drop=True)
+
+    # Görüntüleme limitini tüm filtreler ve sıralama tamamlandıktan SONRA uygula
+    if display_limit is not None and int(display_limit) > 0:
+        combos = combos.head(int(display_limit)).reset_index(drop=True)
 
     return combos
