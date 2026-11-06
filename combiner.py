@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 import pandas as pd
 from scraper import FlightOption
+from baggage_rules import evaluate_leg_baggage, BaggageLegResult
 
 
 # Hedef şehirlere göre varsayılan TAHMİNİ tek yön kara ulaşımı (tren/otobüs) değerleri (EUR cinsinden).
@@ -61,16 +62,16 @@ def parse_hhmm_to_minutes(hhmm: Optional[str]) -> Optional[int]:
     return int(m.group(1)) * 60 + int(m.group(2))
 
 
-def format_baggage_status(cabin_flag: Optional[bool]) -> str:
+def format_baggage_status(cabin_flag: Optional[bool]) -> Optional[str]:
     """
     Havayolu adına göre tahmin yürütmez; yalnızca gerçek tekliften doğrulanmışsa
-    Dahil/Hariç yazar, aksi halde 'Bilinmiyor (Doğrulanmadı)' döner.
+    Dahil/Hariç yazar, aksi halde None döner (tahmin motoru kendi açıklamasını sunar).
     """
     if cabin_flag is True:
-        return "✅ Kabin Bagajı Dahil (Doğrulandı)"
+        return "✅ Kabin Bagajı Dahil (Tekliften Doğrulandı)"
     if cabin_flag is False:
-        return "❌ Kabin Bagajı Hariç (Doğrulandı)"
-    return "❓ Bagaj: Bilinmiyor (Doğrulanmadı)"
+        return "❌ Kabin Bagajı Hariç (Tekliften Doğrulandı)"
+    return None
 
 
 def _resolve_arrival_date(row: pd.Series) -> Optional[str]:
@@ -136,11 +137,23 @@ def build_combinations_dataframe(
     baggage_mode: str = "none",  # "none" | "free_cabin_only" | "add_cabin_bag" | "add_checked_bag"
     cabin_bag_fee: float = 0.0,
     checked_bag_fee: float = 0.0,
+    out_cabin_req: str = "none",
+    out_checked_req: int = 0,
+    out_baggage_included_only: bool = False,
+    out_manual_cabin_fee: Optional[float] = None,
+    out_manual_checked_fee: Optional[float] = None,
+    in_cabin_req: str = "none",
+    in_checked_req: int = 0,
+    in_baggage_included_only: bool = False,
+    in_manual_cabin_fee: Optional[float] = None,
+    in_manual_checked_fee: Optional[float] = None,
+    manual_eur_rate: Optional[float] = None,
     excluded_airlines: Optional[List[str]] = None,
     out_excluded_airlines: Optional[List[str]] = None,
     in_excluded_airlines: Optional[List[str]] = None,
     out_excluded_airports: Optional[List[str]] = None,
     in_excluded_airports: Optional[List[str]] = None,
+    include_weekend: bool = False,
     include_transfer: bool = False,
     transfer_costs: Optional[Dict[str, float]] = None,
     transfer_durations: Optional[Dict[str, int]] = None,
@@ -159,6 +172,29 @@ def build_combinations_dataframe(
     """
     if not outbound_flights or not inbound_flights:
         return pd.DataFrame()
+
+    # Geriye dönük uyumluluk ve bağımsız bagaj parametreleri eşlemesi
+    if baggage_mode == "free_cabin_only":
+        out_baggage_included_only = True
+        in_baggage_included_only = True
+        if out_cabin_req == "none":
+            out_cabin_req = "1x8kg"
+        if in_cabin_req == "none":
+            in_cabin_req = "1x8kg"
+    elif baggage_mode == "add_cabin_bag":
+        if out_cabin_req == "none":
+            out_cabin_req = "1x8kg"
+            out_manual_cabin_fee = cabin_bag_fee
+        if in_cabin_req == "none":
+            in_cabin_req = "1x8kg"
+            in_manual_cabin_fee = cabin_bag_fee
+    elif baggage_mode == "add_checked_bag":
+        if out_checked_req == 0:
+            out_checked_req = 20
+            out_manual_checked_fee = checked_bag_fee
+        if in_checked_req == 0:
+            in_checked_req = 20
+            in_manual_checked_fee = checked_bag_fee
 
     df_out = pd.DataFrame([f.to_dict() for f in outbound_flights])
     df_in = pd.DataFrame([f.to_dict() for f in inbound_flights])
@@ -265,10 +301,104 @@ def build_combinations_dataframe(
     if in_excl_airports:
         df_in = df_in[~df_in["origin"].astype(str).str.upper().isin(in_excl_airports)]
 
-    # 5) "Ücretsiz kabin bagajı" filtresinden YALNIZCA gerçek tekliften doğrulanmış (True) olanlar geçer
-    if baggage_mode == "free_cabin_only":
-        df_out = df_out[df_out["cabin_baggage_included"].apply(lambda x: x is True)]
-        df_in = df_in[df_in["cabin_baggage_included"].apply(lambda x: x is True)]
+    # 5) Bağımsız bacak bagaj maliyeti ve durum değerlendirmesi (Gidiş ve Dönüş bacakları tekil değerlendirilir)
+    def _eval_out_bag(row: pd.Series) -> pd.Series:
+        r = evaluate_leg_baggage(
+            flight_data=row.to_dict(),
+            cabin_req=out_cabin_req,
+            checked_req=out_checked_req,
+            baggage_included_only=out_baggage_included_only,
+            manual_cabin_fee=out_manual_cabin_fee,
+            manual_checked_fee=out_manual_checked_fee,
+            currency=str(row.get("currency") or expected_currency or "TRY"),
+            manual_eur_rate=manual_eur_rate,
+        )
+        return pd.Series(
+            [
+                r.leg_baggage_cost,
+                r.cabin_cost,
+                r.checked_cost,
+                r.cabin_status,
+                r.checked_status,
+                r.leg_summary_text,
+                r.cabin_desc,
+                r.checked_desc,
+                r.personal_bag_info,
+                r.leg_cost_known,
+                r.passes_filter,
+                (r.cabin_status in ("reference_estimate", "manual_estimate") or r.checked_status in ("reference_estimate", "manual_estimate")),
+            ],
+            index=[
+                "baggage_cost",
+                "cabin_cost",
+                "checked_cost",
+                "cabin_status",
+                "checked_status",
+                "baggage_desc",
+                "cabin_desc",
+                "checked_desc",
+                "personal_bag_info",
+                "baggage_cost_known",
+                "passes_baggage_filter",
+                "baggage_is_estimated",
+            ],
+        )
+
+    def _eval_in_bag(row: pd.Series) -> pd.Series:
+        r = evaluate_leg_baggage(
+            flight_data=row.to_dict(),
+            cabin_req=in_cabin_req,
+            checked_req=in_checked_req,
+            baggage_included_only=in_baggage_included_only,
+            manual_cabin_fee=in_manual_cabin_fee,
+            manual_checked_fee=in_manual_checked_fee,
+            currency=str(row.get("currency") or expected_currency or "TRY"),
+            manual_eur_rate=manual_eur_rate,
+        )
+        return pd.Series(
+            [
+                r.leg_baggage_cost,
+                r.cabin_cost,
+                r.checked_cost,
+                r.cabin_status,
+                r.checked_status,
+                r.leg_summary_text,
+                r.cabin_desc,
+                r.checked_desc,
+                r.personal_bag_info,
+                r.leg_cost_known,
+                r.passes_filter,
+                (r.cabin_status in ("reference_estimate", "manual_estimate") or r.checked_status in ("reference_estimate", "manual_estimate")),
+            ],
+            index=[
+                "baggage_cost",
+                "cabin_cost",
+                "checked_cost",
+                "cabin_status",
+                "checked_status",
+                "baggage_desc",
+                "cabin_desc",
+                "checked_desc",
+                "personal_bag_info",
+                "baggage_cost_known",
+                "passes_baggage_filter",
+                "baggage_is_estimated",
+            ],
+        )
+
+    out_bag_df = df_out.apply(_eval_out_bag, axis=1)
+    for col in out_bag_df.columns:
+        df_out[col] = out_bag_df[col]
+
+    in_bag_df = df_in.apply(_eval_in_bag, axis=1)
+    for col in in_bag_df.columns:
+        df_in[col] = in_bag_df[col]
+
+    # "Bu yönde bagaj dahil olsun" filtresi aktifse uygun olmayan bacakları eler
+    if out_baggage_included_only:
+        df_out = df_out[df_out["passes_baggage_filter"].astype(bool)].copy()
+    if in_baggage_included_only:
+        df_in = df_in[df_in["passes_baggage_filter"].astype(bool)].copy()
 
     if df_out.empty or df_in.empty:
         return pd.DataFrame()
@@ -313,6 +443,62 @@ def build_combinations_dataframe(
     if combos.empty:
         return pd.DataFrame()
 
+    # Tatile haftasonunu dahil etme (Cumartesi / Pazar) tespiti (Benzersiz tarih çiftleri üzerinden hızlı hesap)
+    _weekend_cache = {}
+    def _get_weekend_info(start_str: str, end_str: str):
+        key = (str(start_str).strip(), str(end_str).strip())
+        if key in _weekend_cache:
+            return _weekend_cache[key]
+        has_sat = False
+        has_sun = False
+        weekend_count = 0
+        try:
+            s_dt = datetime.strptime(key[0], "%Y-%m-%d")
+            e_dt = datetime.strptime(key[1], "%Y-%m-%d")
+            if s_dt > e_dt:
+                s_dt, e_dt = e_dt, s_dt
+            cur = s_dt
+            while cur <= e_dt:
+                wd = cur.weekday()
+                if wd == 5:
+                    has_sat = True
+                    weekend_count += 1
+                elif wd == 6:
+                    has_sun = True
+                    weekend_count += 1
+                cur += timedelta(days=1)
+        except Exception:
+            pass
+
+        # Haftasonu dahil filtresi hem Cumartesi hem Pazar gününün hedefte geçirilmesini gerektirir
+        includes_weekend = has_sat and has_sun
+        if has_sat and has_sun:
+            weekend_label = "Cmt & Paz"
+        elif has_sat:
+            weekend_label = "Yalnızca Cumartesi"
+        elif has_sun:
+            weekend_label = "Yalnızca Pazar"
+        else:
+            weekend_label = "Hafta İçi"
+        res = (includes_weekend, weekend_count, weekend_label)
+        _weekend_cache[key] = res
+        return res
+
+    start_series = combos["out_arrival_date"].fillna(combos["out_date"]).astype(str)
+    end_series = combos["in_date"].astype(str)
+    unique_pairs = list(set(zip(start_series, end_series)))
+    pair_map = {pair: _get_weekend_info(pair[0], pair[1]) for pair in unique_pairs}
+    weekend_res = [pair_map.get((s, e), (False, 0, "Hafta İçi")) for s, e in zip(start_series, end_series)]
+    combos["includes_weekend"] = [w[0] for w in weekend_res]
+    combos["weekend_days_count"] = [w[1] for w in weekend_res]
+    combos["weekend_label"] = [w[2] for w in weekend_res]
+
+    if include_weekend:
+        combos = combos[combos["includes_weekend"]].copy()
+
+    if combos.empty:
+        return pd.DataFrame()
+
     # Asimetrik rota kontrolü
     combos["is_asymmetric"] = combos["out_destination"] != combos["in_origin"]
     combos["route_summary"] = (
@@ -325,25 +511,17 @@ def build_combinations_dataframe(
         + combos["in_destination"]
     )
 
-    # 6) Manuel tahmini bagaj ek ücreti hesabı
-    if baggage_mode == "add_cabin_bag":
-        combos["out_baggage_cost"] = combos["out_cabin_baggage_included"].apply(
-            lambda x: 0.0 if x is True else float(cabin_bag_fee)
-        )
-        combos["in_baggage_cost"] = combos["in_cabin_baggage_included"].apply(
-            lambda x: 0.0 if x is True else float(cabin_bag_fee)
-        )
-        combos["baggage_is_estimated"] = True
-    elif baggage_mode == "add_checked_bag":
-        combos["out_baggage_cost"] = float(checked_bag_fee)
-        combos["in_baggage_cost"] = float(checked_bag_fee)
-        combos["baggage_is_estimated"] = True
-    else:
-        combos["out_baggage_cost"] = 0.0
-        combos["in_baggage_cost"] = 0.0
-        combos["baggage_is_estimated"] = False
-
-    combos["baggage_total_price"] = combos["out_baggage_cost"] + combos["in_baggage_cost"]
+    # 6) Bağımsız bacak bagaj toplamı ve bilinirlik durumu (Vektörel)
+    both_cost_known = combos["out_baggage_cost_known"].astype(bool) & combos["in_baggage_cost_known"].astype(bool)
+    combos["baggage_cost_known"] = both_cost_known
+    combos["baggage_total_price"] = pd.Series(index=combos.index, dtype="float64")
+    combos.loc[both_cost_known, "baggage_total_price"] = (
+        combos.loc[both_cost_known, "out_baggage_cost"].astype(float)
+        + combos.loc[both_cost_known, "in_baggage_cost"].astype(float)
+    ).round(2)
+    combos["baggage_is_estimated"] = (
+        combos["out_baggage_is_estimated"].astype(bool) | combos["in_baggage_is_estimated"].astype(bool)
+    )
 
     # 7) Kara ulaşımı (transfer) maliyeti ve süresi
     # Eksik transfer maliyetini sessizce 0 kabul ederek daha ucuz seçenek üretme!
@@ -396,9 +574,9 @@ def build_combinations_dataframe(
     )
     combos["grand_total_price"] = (
         combos["flight_total_price"]
-        + combos["baggage_total_price"]
+        + combos["baggage_total_price"].fillna(0.0).astype(float)
         + combos["transfer_total_price"]
-    )
+    ).round(2)
 
     # Süre toplamları: süresi bilinmeyen uçuşları 0 dakika gösterme veya en kısa uçuş olarak sıralama!
     out_dur_valid = combos["out_duration_minutes"].notna() & (combos["out_duration_minutes"] > 0)
@@ -440,9 +618,10 @@ def build_combinations_dataframe(
             return pd.DataFrame()
 
     # Toplam maliyete ve ardından toplam seyahat süresine göre sırala (süresi bilinmeyenler en sona!)
+    # Bagaj maliyeti tam bilinenler önce sıralanır; belirsiz olanlar asla ücretsizmiş gibi öne geçmez!
     combos = combos.sort_values(
-        by=["grand_total_price", "total_travel_minutes"],
-        ascending=[True, True],
+        by=["baggage_cost_known", "grand_total_price", "total_travel_minutes"],
+        ascending=[False, True, True],
         na_position="last",
     ).reset_index(drop=True)
 

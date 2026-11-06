@@ -1,14 +1,14 @@
 # GEMINI.md — Smart Flight Finder (Kişisel Akıllı Uçuş Bulucu)
 
 ## 1. Proje Amacı ve Özeti
-**Smart Flight Finder**, kişisel kullanım için geliştirilmiş, yakın alternatif havalimanlarını (en fazla **3 hedef havalimanı**) ve esnek tarih aralıklarını tarayarak en ucuz/mantıklı **simetrik veya asimetrik gidiş-dönüş** uçuş kombinasyonlarını (ör. Gidiş: `ESB -> CGN`, Dönüş: `AMS -> ESB`) bulan yerel bir web uygulamasıdır.
+**Smart Flight Finder**, kişisel kullanım için geliştirilmiş, yakın alternatif havalimanlarını (en fazla **4 hedef havalimanı**) ve esnek tarih aralıklarını tarayarak en ucuz/mantıklı **simetrik veya asimetrik gidiş-dönüş** uçuş kombinasyonlarını (ör. Gidiş: `ESB -> CGN`, Dönüş: `AMS -> ESB`) bulan yerel bir web uygulamasıdır.
 
 ---
 
 ## 2. Temel Kısıtlar ve Mimari Prensipler
 1. **0 TL API Maliyeti:** Ücretli uçuş API'leri (Amadeus, Kiwi, Skyscanner vb.) kullanılmaz. Tüm uçuş verileri arka planda **Playwright** ile doğrudan **Google Flights** üzerinden çekilir.
 2. **Ayrık Tek Yön (Decoupled One-Way) Kombinasyon ve Gece Hesabı:**
-   - Gidiş ve dönüş rotaları **tek yön** olarak bağımsız taranır (`Kalkış -> Hedef Havalimanları` ve `Hedef Havalimanları -> Kalkış`, karşı tarafta en fazla 3 benzersiz hedef havalimanı).
+   - Gidiş ve dönüş rotaları **tek yön** olarak bağımsız taranır (`Kalkış -> Hedef Havalimanları` ve `Hedef Havalimanları -> Kalkış`, karşı tarafta en fazla 4 benzersiz hedef havalimanı).
    - Kullanıcı tek bir **Seyahat Tarih Aralığı** (`En Erken Gidiş` – `Eve En Geç Varış`) ve **Hedefte Kalış Süresi (Gece)** (`min_stay` – `max_stay`) seçer.
    - **Gece Sayısı Hesabı:** Hedefte kalış gecesi (`stay_days`), gidiş uçuşunun **hedefe varış yerel tarihi** (`out_arrival_date`) ile dönüş uçuşunun **kalkış yerel tarihi** (`in_date`) arasındaki gün farkı olarak hesaplanır (`+1` / `+2` / `"ertesi gün"` / `"next day"` gün farkları varış alanına bağlanarak ayrıştırılır; ör. 1 Aralık kalkış, 2 Aralık hedefe varış, 6 Aralık dönüş = **4 gece**).
    - **Dönüş Varış Kontrolü:** Dönüş uçuşunun kalkış havalimanına varış yerel tarihi (`in_arrival_date`), seyahat penceresinin son gününü (`window_end`) aşamaz.
@@ -25,9 +25,17 @@
    - Okunamayan `stops`, `duration_minutes`, `departure_time`, `arrival_time`, `arrival_day_offset` ve `cabin_baggage_included` alanları `None` (`null`) olarak modellenir ve arayüzde `"Doğrulanmadı"` olarak gösterilir.
    - Aktarma filtresi (`max_stops`, `out_max_stops`, `in_max_stops`), gidiş ve dönüş için ayrı havayolu filtreleri (`out_excluded_airlines`, `in_excluded_airlines`), maksimum bacak/toplam seyahat süresi filtresi (`max_flight_hours`, `max_total_travel_hours`), kalkış saati filtresi ve `"Ücretsiz kabin bagajı"` filtresi aktifken ilgili alanı doğrulanmamış (`None`) uçuşlar filtreden geçirilmez.
    - Süresi bilinmeyen uçuşlar `0 dk` gösterilmez ve en kısa uçuş gibi en üste sıralanmaz (`na_position="last"`).
-5. **Bagaj ve Kara Ulaşımı (Transfer) Tahmini:**
-   - Havayolu adına bakılarak otomatik `"8 kg kabin ücretsiz"` veya `"sadece koltuk altı"` varsayımı yapılmaz; yalnızca teklif metninden doğrulanırsa işaretlenir. Olumsuz ifadeler (`"Kabin bagajı dahil değil"`, `"Sadece koltuk altı"`) önce yakalanıp maskelenir; bağımsız olumlu ve olumsuz ifadeler çelişirse veya bilgi yoksa `None` (`"Bilinmiyor (Doğrulanmadı)"`) döndürülür.
-   - Sabit kur varsayımı yoktur; kullanıcı arayüzden manuel döviz kuru (`1 EUR -> TRY/USD`) ve tahmini transfer/bagaj ücretlerini düzenleyebilir. Eksik transfer maliyeti sessizce `0` kabul edilmez.
+5. **Bağımsız Bacak Bagaj Filtreleri, Tahmin Motoru (`baggage_rules.py`) ve Kara Ulaşımı:**
+   - Gidiş ve dönüş bacakları için bağımsız bagaj seçenekleri sunulur: Üst dolap kabin valizi (`"none"` / `"1x8kg"`), uçak altı bagajı (`0, 5, 10, 15, 20, 30, 35 kg`), isteğe bağlı `"Bu yönde bagaj dahil olsun"` filtresi (`out_baggage_included_only`, `in_baggage_included_only`) ve isteğe bağlı manuel ek ücret alanları.
+   - Doğrulanmış teklif verisi her zaman tahminin önündedir. Karttan doğrulanamayan durumlarda yetişkin ekonomi Türkiye–Avrupa hatları referans verileri (`baggage_rules.py`) kullanılır:
+     - **SunExpress:** Uluslararası/standart Avrupa hatlarında default paket **SunValue**'dur: 4 kg koltuk altı çanta, 8 kg (55×40×23 cm) kabin valizi ve **20 kg'a kadar kayıtlı uçak altı bagajı fiyata dahildir (€0 ek ücret)**. 20 kg üzeri ihtiyaçlarda SunEco+ (30 kg, tahmini +€15) ve SunComfort (35 kg, tahmini +€45) paket yükseltme farkları referans alınır.
+     - **THY:** EcoFly 8 kg kabin + 4 kg kişisel çanta dahil. EcoFly uçak altı rotaya bağlıdır; her bilete sabit 15 kg veya 0 kg atanmaz, teklifte fiyat yoksa belirsiz bırakılır.
+     - **AJet:** Basic 4 kg koltuk altı ücretsiz; kabin çelişkili olduğundan doğrulanmadıkça `"AJet Basic varsayımı: kabin ücretli, bilette kontrol edin"` etiketi verilir. Almanya/Hollanda online referansı: 8 kg kabin €15, uçak altı 0–10 kg €12, 11–20 kg €25.
+     - **Pegasus:** Light 3 kg koltuk altı ücretsiz. Eylül 2026 kampanya rakamları tarihli kampanya referansıdır; otomatik tahmin olarak uygulanmaz ve fiyat yoksa belirsiz (`unknown`) bırakılır.
+   - Aktarmalı uçuşlarda referans ücretler aktarma sayısıyla çarpılmaz; belirsiz bırakılır.
+   - Sabit kur varsayımı yoktur; kullanıcı arayüzden manuel döviz kuru (`1 EUR -> TRY/USD`) girebilir. Kur girilmediğinde EUR referansları TRY/USD toplamına eklenmez (belirsiz kalır).
+   - Bagaj maliyeti tam hesaplanabilen seçenekler `grand_total_price`'a göre sıralanır. Bagaj maliyeti belirsiz olan uçuşlar asla bagaj ücretsizmiş gibi en tepeye yerleşmez (`baggage_cost_known` öncelikli sıralama).
+   - Eksik transfer maliyeti sessizce `0` kabul edilmez.
 6. **Seçili Kombinasyonu Yeniden Kontrol Etme ve Bağlantılar:**
    - Sonuç kartlarındaki **"🔄 Fiyatı Yeniden Kontrol Et"** butonu (`/api/recheck`), yalnızca seçili gidiş ve dönüş rota/gününü önbelleği atlayarak yeniden tarar. Uçuş numarası (`flight_number`), kalkış/varış saatleri, varış yerel tarihi (`arrival_date` / `arrival_day_offset`), aktarma sayısı (`stops`), sıralı segmentler (`segments`) ve aktarma havalimanları (`layover_airports`) birlikte doğrulanır. Farklı uçuş numaraları veya farklı varış günleri asla eşleştirilmez; kimlik bilgisi yetersiz veya belirsizse `"identity_unverified"` (`"Uçuş kimliği doğrulanamadı"`) durumu döndürülür.
    - Uygulama doğrudan bilet satışı yapmaz; bağlantılar **"Google Flights'ta Aramayı Aç ↗"** olarak etiketlenir ve sonuçların iki bağımsız tek yön teklifin toplamı olduğu açıkça belirtilir.
@@ -42,9 +50,10 @@
 | Dosya | Açıklama |
 | :--- | :--- |
 | `scraper.py` | Playwright tabanlı Google Flights tek yön scraper modülü. `FlightOption` ve `RouteQueryResult` veri modelleri, HTML/DOM ayrıştırıcı (`parse_flights_from_html`), sorgu durumu sınıflandırması (`success`, `no_results`, `timeout`, `blocked`, `parse_error`), atomik ve epoch korumalı önbellek (`flight_cache.json`) ve seçili kombinasyon fiyat kontrolü (`recheck_combination`) işlevlerini içerir. |
-| `combiner.py` | Pandas kullanarak gidiş ve dönüş tek yön uçuşlarının kartezyen çarpımını yapar (`build_combinations_dataframe`). Varış yerel tarihine göre kalış gecesi hesabı, pencere sonu varış kontrolü, nullable filtreleme, tahmini bagaj/transfer maliyetleri ve JSON `NaN -> null` temizliğini (`sanitize_records_for_json`) gerçekleştirir. |
+| `baggage_rules.py` | Yetişkin ekonomi Türkiye–Avrupa hatları için havayolu kuralları (SunExpress, THY, AJet, Pegasus), bacak bazında bağımsız bagaj değerlendirmesi (`evaluate_leg_baggage`), referans EUR/hedef döviz dönüşümü ve filtre uyumluluğunu yöneten modül. |
+| `combiner.py` | Pandas kullanarak gidiş ve dönüş tek yön uçuşlarının kartezyen çarpımını yapar (`build_combinations_dataframe`). Varış yerel tarihine göre kalış gecesi hesabı, pencere sonu varış kontrolü, bağımsız bagaj maliyetleri, nullable filtreleme, tahmini bagaj/transfer maliyetleri ve JSON `NaN -> null` temizliğini (`sanitize_records_for_json`) gerçekleştirir. |
 | `server.py` | Yerel HTTP ve JSON API sunucusu (`http://localhost:8000`). `urllib.parse.urlsplit(self.path).path` ile rota eşleştirir; girdi doğrulaması (`validate_search_request`), tekil iş kilidi (`JOB_LOCK`), durdurma (`/api/scrape/stop`), ilerleme (`/api/progress`), kombinasyon (`/api/combine`), fiyat kontrolü (`/api/recheck`) ve önbellek (`/api/cache`) uç noktalarını sunar. |
-| `index.html` | Sıfır harici bağımlılıklı, karanlık tema destekli yerel Web Arayüzü. En fazla 3 hedef havalimanı seçimi, manuel kur alanı, canlı sorgu istatistikleri (`başarılı / uçuş yok / hatalı / önbellekten`), durdurma/devam etme, uçuş sonrası filtreler ve "Fiyatı Yeniden Kontrol Et" özelliklerini barındırır. |
+| `index.html` | Sıfır harici bağımlılıklı, karanlık tema destekli yerel Web Arayüzü. En fazla 4 hedef havalimanı seçimi, manuel kur alanı, canlı sorgu istatistikleri (`başarılı / uçuş yok / hatalı / önbellekten`), durdurma/devam etme, uçuş sonrası filtreler ve "Fiyatı Yeniden Kontrol Et" özelliklerini barındırır. |
 | `app.py` | Güncel veri modeliyle uyumlu alternatif Streamlit arayüzü. |
 | `tests/test_regressions.py` | Kaydedilmiş örnek HTML (`tests/fixtures/*.html`) ve sahte verilerle tüm kritik senaryoları doğrulayan `unittest` regresyon test paketi. |
 | `baslat.bat` | Windows'ta yerel sunucuyu (`server.py`) başlatıp tarayıcıda `http://localhost:8000` adresini açan başlatıcı betik. |

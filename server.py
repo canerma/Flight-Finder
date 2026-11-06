@@ -82,7 +82,7 @@ def validate_search_request(
     Girdi doğrulaması yapar:
     - Kalkış havalimanı geçerli 3 harfli IATA kodu olmalı.
     - Kalkış havalimanı hedef listesinden çıkarılır.
-    - Benzersiz hedef havalimanı sayısı en az 1, en fazla 3 olmalı.
+    - Benzersiz hedef havalimanı sayısı en az 1, en fazla 4 olmalı.
     - Tarihler, gece sayıları, sonuç limiti ve eşzamanlılık pozitif/geçerli aralıkta olmalı.
     """
     if not isinstance(body, dict):
@@ -108,8 +108,8 @@ def validate_search_request(
 
     if len(target_airports) == 0:
         return None, "Kalkış havalimanı hariç en az 1 hedef havalimanı seçilmelidir."
-    if len(target_airports) > 3:
-        return None, f"En fazla 3 benzersiz hedef havalimanı seçilebilir (seçilen: {len(target_airports)})."
+    if len(target_airports) > 4:
+        return None, f"En fazla 4 benzersiz hedef havalimanı seçilebilir (seçilen: {len(target_airports)})."
 
     currency = str(body.get("currency", "TRY")).upper().strip()
     if currency not in VALID_CURRENCIES:
@@ -230,6 +230,69 @@ def validate_search_request(
     except (ValueError, TypeError):
         return None, "Geçersiz bagaj ek ücreti."
 
+    def _parse_opt_float(val: Any, name: str) -> Tuple[Optional[float], Optional[str]]:
+        if val is None or str(val).strip() == "":
+            return None, None
+        try:
+            f = float(val)
+            if math.isnan(f) or math.isinf(f) or f < 0:
+                return None, f"{name} negatif olamaz."
+            return f, None
+        except (ValueError, TypeError):
+            return None, f"Geçersiz {name}."
+
+    def _parse_opt_kg(val: Any) -> Tuple[int, Optional[str]]:
+        if val is None or str(val).strip() == "":
+            return 0, None
+        try:
+            k = int(val)
+            if k < 0 or k > 50:
+                return 0, "Uçak altı bagaj kilosu 0 ile 50 kg arasında olmalıdır."
+            return k, None
+        except (ValueError, TypeError):
+            return 0, "Geçersiz uçak altı bagaj kilosu."
+
+    out_cabin_req = str(body.get("out_cabin_req", "none") or "none").strip()
+    if out_cabin_req not in ("none", "1x8kg"):
+        out_cabin_req = "none"
+
+    in_cabin_req = str(body.get("in_cabin_req", "none") or "none").strip()
+    if in_cabin_req not in ("none", "1x8kg"):
+        in_cabin_req = "none"
+
+    out_checked_req, err_ock = _parse_opt_kg(body.get("out_checked_req", 0))
+    if err_ock:
+        return None, err_ock
+
+    in_checked_req, err_ick = _parse_opt_kg(body.get("in_checked_req", 0))
+    if err_ick:
+        return None, err_ick
+
+    out_baggage_included_only = bool(body.get("out_baggage_included_only", False))
+    in_baggage_included_only = bool(body.get("in_baggage_included_only", False))
+
+    out_manual_cabin_fee, err_omcf = _parse_opt_float(body.get("out_manual_cabin_fee"), "Gidiş manuel kabin ücreti")
+    if err_omcf:
+        return None, err_omcf
+
+    out_manual_checked_fee, err_omckf = _parse_opt_float(body.get("out_manual_checked_fee"), "Gidiş manuel alt bagaj ücreti")
+    if err_omckf:
+        return None, err_omckf
+
+    in_manual_cabin_fee, err_imcf = _parse_opt_float(body.get("in_manual_cabin_fee"), "Dönüş manuel kabin ücreti")
+    if err_imcf:
+        return None, err_imcf
+
+    in_manual_checked_fee, err_imckf = _parse_opt_float(body.get("in_manual_checked_fee"), "Dönüş manuel alt bagaj ücreti")
+    if err_imckf:
+        return None, err_imckf
+
+    manual_eur_rate, err_mer = _parse_opt_float(body.get("manual_eur_rate"), "Manuel EUR kuru")
+    if err_mer:
+        return None, err_mer
+    if manual_eur_rate is not None and manual_eur_rate <= 0:
+        return None, "Manuel EUR kuru pozitif olmalıdır."
+
     display_limit_raw = body.get("display_limit", 250)
     try:
         display_limit = int(display_limit_raw) if display_limit_raw is not None and str(display_limit_raw).strip() != "" else 250
@@ -265,12 +328,24 @@ def validate_search_request(
         "baggage_mode": str(body.get("baggage_mode", "none")).strip() or "none",
         "cabin_bag_fee": cabin_bag_fee,
         "checked_bag_fee": checked_bag_fee,
+        "out_cabin_req": out_cabin_req,
+        "out_checked_req": out_checked_req,
+        "out_baggage_included_only": out_baggage_included_only,
+        "out_manual_cabin_fee": out_manual_cabin_fee,
+        "out_manual_checked_fee": out_manual_checked_fee,
+        "in_cabin_req": in_cabin_req,
+        "in_checked_req": in_checked_req,
+        "in_baggage_included_only": in_baggage_included_only,
+        "in_manual_cabin_fee": in_manual_cabin_fee,
+        "in_manual_checked_fee": in_manual_checked_fee,
+        "manual_eur_rate": manual_eur_rate,
         "excluded_airlines": body.get("excluded_airlines", []) or [],
         "out_excluded_airlines": body.get("out_excluded_airlines", []) or [],
         "in_excluded_airlines": body.get("in_excluded_airlines", []) or [],
         "out_excluded_airports": body.get("out_excluded_airports", []) or [],
         "in_excluded_airports": body.get("in_excluded_airports", []) or [],
         "only_asymmetric": bool(body.get("only_asymmetric", False)),
+        "include_weekend": bool(body.get("include_weekend", False)),
         "include_transfer": bool(body.get("include_transfer", False)),
         "transfer_costs": body.get("transfer_costs", {}) or {},
         "transfer_durations": body.get("transfer_durations", {}) or {},
@@ -741,11 +816,23 @@ class FlightFinderHandler(SimpleHTTPRequestHandler):
             baggage_mode=validated["baggage_mode"],
             cabin_bag_fee=validated["cabin_bag_fee"],
             checked_bag_fee=validated["checked_bag_fee"],
+            out_cabin_req=validated["out_cabin_req"],
+            out_checked_req=validated["out_checked_req"],
+            out_baggage_included_only=validated["out_baggage_included_only"],
+            out_manual_cabin_fee=validated["out_manual_cabin_fee"],
+            out_manual_checked_fee=validated["out_manual_checked_fee"],
+            in_cabin_req=validated["in_cabin_req"],
+            in_checked_req=validated["in_checked_req"],
+            in_baggage_included_only=validated["in_baggage_included_only"],
+            in_manual_cabin_fee=validated["in_manual_cabin_fee"],
+            in_manual_checked_fee=validated["in_manual_checked_fee"],
+            manual_eur_rate=validated["manual_eur_rate"],
             excluded_airlines=validated["excluded_airlines"],
             out_excluded_airlines=validated["out_excluded_airlines"],
             in_excluded_airlines=validated["in_excluded_airlines"],
             out_excluded_airports=validated["out_excluded_airports"],
             in_excluded_airports=validated["in_excluded_airports"],
+            include_weekend=validated["include_weekend"],
             include_transfer=validated["include_transfer"],
             transfer_costs=validated["transfer_costs"],
             transfer_durations=validated["transfer_durations"],

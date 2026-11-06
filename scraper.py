@@ -50,6 +50,8 @@ class FlightOption:
     arrival_day_offset: Optional[int] = None      # 0 = aynı gün, 1 = +1 gün, doğrulanmadıysa None
     arrival_date: Optional[str] = None            # Varış yerel tarihi (YYYY-MM-DD) veya None
     cabin_baggage_included: Optional[bool] = None # Yalnızca kart metninden doğrulanırsa True/False, aksi halde None
+    checked_baggage_included: Optional[bool] = None
+    checked_baggage_kg: Optional[int] = None
     flight_number: Optional[str] = None
     layover_airports: Optional[List[str]] = None
     self_transfer: Optional[bool] = None
@@ -86,6 +88,8 @@ class FlightOption:
             arrival_day_offset=int(offset) if offset is not None else None,
             arrival_date=arr_date,
             cabin_baggage_included=data.get("cabin_baggage_included", None),
+            checked_baggage_included=data.get("checked_baggage_included", None),
+            checked_baggage_kg=int(data["checked_baggage_kg"]) if data.get("checked_baggage_kg") is not None else None,
             flight_number=data.get("flight_number") or None,
             layover_airports=data.get("layover_airports") or None,
             self_transfer=data.get("self_transfer", None),
@@ -1841,19 +1845,39 @@ async def scrape_decoupled_roundtrip_async(
             viewport={"width": 1280, "height": 900},
         )
 
+        stop_listener_task = None
+        if stop_event:
+            async def _watch_stop():
+                while not stop_event.is_set():
+                    await asyncio.sleep(0.12)
+                # Durdurma sinyali alındığında context'i kapatarak açık tüm sekmeleri anında sonlandır
+                try:
+                    await context.close()
+                except Exception:
+                    pass
+
+            stop_listener_task = asyncio.create_task(_watch_stop())
+
         async def _wrapped_scrape(direction: str, orig: str, dest: str, d: str):
-            async with semaphore:
+            if stop_event and stop_event.is_set():
+                return direction, None
+            try:
+                async with semaphore:
+                    if stop_event and stop_event.is_set():
+                        return direction, None
+                    qres = await scrape_route_on_date_result(
+                        context=context,
+                        origin=orig,
+                        destination=dest,
+                        date_str=d,
+                        currency=currency,
+                        max_results_per_route=max_results_per_route,
+                        semaphore=None,
+                    )
+            except Exception:
                 if stop_event and stop_event.is_set():
                     return direction, None
-                qres = await scrape_route_on_date_result(
-                    context=context,
-                    origin=orig,
-                    destination=dest,
-                    date_str=d,
-                    currency=currency,
-                    max_results_per_route=max_results_per_route,
-                    semaphore=None,
-                )
+                raise
 
             ckey = _cache_key(orig, dest, d, currency)
             update_single_cache_entry(
@@ -1878,10 +1902,17 @@ async def scrape_decoupled_roundtrip_async(
             return direction, qres
 
         results = await asyncio.gather(
-            *[_wrapped_scrape(direction, orig, dest, d) for direction, orig, dest, d in uncached_tasks]
+            *[_wrapped_scrape(direction, orig, dest, d) for direction, orig, dest, d in uncached_tasks],
+            return_exceptions=True,
         )
 
-        for direction, qres in results:
+        if stop_listener_task and not stop_listener_task.done():
+            stop_listener_task.cancel()
+
+        for res in results:
+            if isinstance(res, Exception) or res is None:
+                continue
+            direction, qres = res
             if qres is None or qres.status != QUERY_STATUS_SUCCESS:
                 continue
             if direction == "OUT":
@@ -1889,8 +1920,14 @@ async def scrape_decoupled_roundtrip_async(
             else:
                 inbound_flights.extend(qres.flights)
 
-        await context.close()
-        await browser.close()
+        try:
+            await context.close()
+        except Exception:
+            pass
+        try:
+            await browser.close()
+        except Exception:
+            pass
 
     return outbound_flights, inbound_flights, stats
 

@@ -714,9 +714,23 @@ class SmartFlightFinderRegressionTests(unittest.TestCase):
         legacy_entry = {"status": "success", "flights": []}
         self.assertFalse(is_cache_entry_usable(legacy_entry, 8))
 
-    # 9. Üçten fazla hedef ve geçersiz sayısal girdiler reddedilir (HTTP 400)
-    def test_09_input_validation_rejects_more_than_3_targets_and_invalid_inputs(self):
+    # 9. Dörtten fazla hedef ve geçersiz sayısal girdiler reddedilir (HTTP 400), 4 hedef kabul edilir
+    def test_09_input_validation_rejects_more_than_4_targets_and_invalid_inputs(self):
         cleaned, err = server.validate_search_request(
+            {
+                "home_airport": "ESB",
+                "target_airports": ["AMS", "DUS", "CGN", "BRU", "EIN"],
+                "window_start": "2026-11-15",
+                "window_end": "2026-11-25",
+                "min_stay_days": 4,
+                "max_stay_days": 6,
+                "currency": "TRY",
+            }
+        )
+        self.assertIsNone(cleaned)
+        self.assertIn("En fazla 4", err)
+
+        cleaned_4, err_4 = server.validate_search_request(
             {
                 "home_airport": "ESB",
                 "target_airports": ["AMS", "DUS", "CGN", "BRU"],
@@ -727,8 +741,8 @@ class SmartFlightFinderRegressionTests(unittest.TestCase):
                 "currency": "TRY",
             }
         )
-        self.assertIsNone(cleaned)
-        self.assertIn("En fazla 3", err)
+        self.assertIsNone(err_4)
+        self.assertEqual(len(cleaned_4["target_airports"]), 4)
 
         cleaned_ok, err_ok = server.validate_search_request(
             {
@@ -751,7 +765,7 @@ class SmartFlightFinderRegressionTests(unittest.TestCase):
                 data=json.dumps(
                     {
                         "home_airport": "ESB",
-                        "target_airports": ["AMS", "DUS", "CGN", "EIN"],
+                        "target_airports": ["AMS", "DUS", "CGN", "EIN", "BRU"],
                         "window_start": "2026-11-15",
                         "window_end": "2026-11-25",
                         "min_stay_days": 4,
@@ -1624,6 +1638,435 @@ class SmartFlightFinderRegressionTests(unittest.TestCase):
         )
         self.assertTrue((df_ap["out_destination"] == "DUS").all())
         self.assertTrue((df_ap["in_origin"] == "AMS").all())
+
+    # 17. Tatile haftasonunu dahil et (include_weekend) filtresi doğru çalışır
+    def test_17_include_weekend_filter(self):
+        # 1. Uçuş: 2026-11-20 Cuma varış, 2026-11-23 Pazartesi dönüş (Cumartesi ve Pazar dahil)
+        f_weekend_out = FlightOption(
+            origin="ESB",
+            destination="AMS",
+            date="2026-11-20",
+            airline="Pegasus",
+            departure_time="08:00",
+            arrival_time="11:00",
+            duration="4 sa",
+            duration_minutes=240,
+            stops=0,
+            stops_text="Aktarmasız",
+            price=3000.0,
+            currency="TRY",
+            booking_url="https://example.com",
+            arrival_day_offset=0,
+            arrival_date="2026-11-20",
+        )
+        f_weekend_in = FlightOption(
+            origin="AMS",
+            destination="ESB",
+            date="2026-11-23",
+            airline="Pegasus",
+            departure_time="14:00",
+            arrival_time="19:00",
+            duration="4 sa",
+            duration_minutes=240,
+            stops=0,
+            stops_text="Aktarmasız",
+            price=3200.0,
+            currency="TRY",
+            booking_url="https://example.com",
+            arrival_day_offset=0,
+            arrival_date="2026-11-23",
+        )
+
+        # 2. Uçuş: 2026-11-16 Pazartesi varış, 2026-11-19 Perşembe dönüş (Yalnızca hafta içi: Pzt, Sal, Çar, Per)
+        f_weekday_out = FlightOption(
+            origin="ESB",
+            destination="AMS",
+            date="2026-11-16",
+            airline="SunExpress",
+            departure_time="09:00",
+            arrival_time="12:00",
+            duration="4 sa",
+            duration_minutes=240,
+            stops=0,
+            stops_text="Aktarmasız",
+            price=2500.0,
+            currency="TRY",
+            booking_url="https://example.com",
+            arrival_day_offset=0,
+            arrival_date="2026-11-16",
+        )
+        f_weekday_in = FlightOption(
+            origin="AMS",
+            destination="ESB",
+            date="2026-11-19",
+            airline="SunExpress",
+            departure_time="15:00",
+            arrival_time="20:00",
+            duration="4 sa",
+            duration_minutes=240,
+            stops=0,
+            stops_text="Aktarmasız",
+            price=2700.0,
+            currency="TRY",
+            booking_url="https://example.com",
+            arrival_day_offset=0,
+            arrival_date="2026-11-19",
+        )
+
+        # 3. Uçuş: 2026-11-22 Pazar varış, 2026-11-25 Çarşamba dönüş (Sadece Pazar dahil, Cumartesi yok)
+        f_sunday_out = FlightOption(
+            origin="ESB",
+            destination="AMS",
+            date="2026-11-22",
+            airline="AJet",
+            departure_time="10:00",
+            arrival_time="13:00",
+            duration="4 sa",
+            duration_minutes=240,
+            stops=0,
+            stops_text="Aktarmasız",
+            price=2600.0,
+            currency="TRY",
+            booking_url="https://example.com",
+            arrival_day_offset=0,
+            arrival_date="2026-11-22",
+        )
+        f_sunday_in = FlightOption(
+            origin="AMS",
+            destination="ESB",
+            date="2026-11-25",
+            airline="AJet",
+            departure_time="16:00",
+            arrival_time="21:00",
+            duration="4 sa",
+            duration_minutes=240,
+            stops=0,
+            stops_text="Aktarmasız",
+            price=2800.0,
+            currency="TRY",
+            booking_url="https://example.com",
+            arrival_day_offset=0,
+            arrival_date="2026-11-25",
+        )
+
+        # Filtre kapalıyken: Üç kombinasyon da döner
+        df_all = build_combinations_dataframe(
+            outbound_flights=[f_weekend_out, f_weekday_out, f_sunday_out],
+            inbound_flights=[f_weekend_in, f_weekday_in, f_sunday_in],
+            min_stay_days=3,
+            max_stay_days=3,
+            include_weekend=False,
+            window_end="2026-11-30",
+        )
+        self.assertEqual(len(df_all), 3)
+
+        # Alanların doğru etiketlendiğini doğrula
+        row_weekend = df_all[df_all["out_date"] == "2026-11-20"].iloc[0]
+        self.assertTrue(row_weekend["includes_weekend"])
+        self.assertEqual(row_weekend["weekend_label"], "Cmt & Paz")
+        self.assertEqual(row_weekend["weekend_days_count"], 2)
+
+        row_weekday = df_all[df_all["out_date"] == "2026-11-16"].iloc[0]
+        self.assertFalse(row_weekday["includes_weekend"])
+        self.assertEqual(row_weekday["weekend_label"], "Hafta İçi")
+        self.assertEqual(row_weekday["weekend_days_count"], 0)
+
+        row_sunday = df_all[df_all["out_date"] == "2026-11-22"].iloc[0]
+        self.assertFalse(row_sunday["includes_weekend"])  # Sadece Pazar dahil olması tam haftasonu sayılmaz!
+        self.assertEqual(row_sunday["weekend_label"], "Yalnızca Pazar")
+        self.assertEqual(row_sunday["weekend_days_count"], 1)
+
+        # include_weekend=True aktifken: SADECE her iki günü de (Cumartesi ve Pazar) içeren kombinasyon döner!
+        df_weekend_only = build_combinations_dataframe(
+            outbound_flights=[f_weekend_out, f_weekday_out, f_sunday_out],
+            inbound_flights=[f_weekend_in, f_weekday_in, f_sunday_in],
+            min_stay_days=3,
+            max_stay_days=3,
+            include_weekend=True,
+            window_end="2026-11-30",
+        )
+        self.assertEqual(len(df_weekend_only), 1)
+        self.assertEqual(df_weekend_only.iloc[0]["out_date"], "2026-11-20")
+        self.assertEqual(df_weekend_only.iloc[0]["in_date"], "2026-11-23")
+        self.assertEqual(df_weekend_only.iloc[0]["weekend_label"], "Cmt & Paz")
+
+    def test_18_independent_leg_baggage_filters_and_estimation(self):
+        """
+        Gidiş ve dönüş için bağımsız bagaj filtreleri, referans ücretler ve maliyet sıralaması:
+        1. Gidişte AJet Basic: 8 kg kabin (€15) + 20 kg uçak altı (€25) = €40.
+        2. Dönüşte SunExpress SunValue varsayımı: 8 kg kabin dahil (€0) ve 20 kg alt bagaj dahil (€0).
+        3. Kombinasyon toplam bagaj maliyeti: €40 + €0 = €40. SunEco+ (30 kg) seçilirse +€15 eklenir.
+        4. Tekliften doğrulanan hak (verified_offer) referansın önüne geçer.
+        5. Pegasus kampanya rakamları otomatik tahmin olarak uygulanmaz (unknown kalır).
+        6. THY EcoFly kabin dahil, uçak altı bilinmiyor olarak kalır (sabit 15kg/0kg atanmaz).
+        7. Kur çarpanı yoksa EUR referansı TRY toplamına eklenmez (unknown kalır).
+        8. Bagaj maliyeti belirsiz olanlar, bilinen seçeneklerin önüne ücretsizmiş gibi geçemez.
+        9. 'Bu yönde bagaj dahil olsun' filtresi doğrulanmamış bagajları eler.
+        """
+        from baggage_rules import evaluate_leg_baggage
+
+        # 1) AJet Almanya Basic: 8 kg kabin (€15) + 20 kg uçak altı (€25)
+        ajet_out = {
+            "origin": "ESB",
+            "destination": "DUS",
+            "airline": "AJet",
+            "stops": 0,
+            "cabin_baggage_included": None,
+            "checked_baggage_included": None,
+            "checked_baggage_kg": None,
+            "currency": "EUR",
+        }
+        res_ajet = evaluate_leg_baggage(
+            flight_data=ajet_out,
+            cabin_req="1x8kg",
+            checked_req=20,
+            currency="EUR",
+        )
+        self.assertEqual(res_ajet.cabin_cost, 15.0)
+        self.assertEqual(res_ajet.checked_cost, 25.0)
+        self.assertEqual(res_ajet.leg_baggage_cost, 40.0)
+        self.assertTrue(res_ajet.leg_cost_known)
+        self.assertIn("AJet Basic varsayımı: kabin ücretli, bilette kontrol edin", res_ajet.cabin_desc)
+        self.assertIn("4 kg", res_ajet.personal_bag_info)
+
+        # 2) SunExpress SunValue varsayımı: 8 kg kabin dahil (€0), 20 kg'a kadar kayıtlı bagaj dahil (€0).
+        # 20 kg üzeri: 30 kg için SunEco+ (+€15), 35 kg için SunComfort (+€45).
+        sun_in = {
+            "origin": "DUS",
+            "destination": "ESB",
+            "airline": "SunExpress",
+            "stops": 0,
+            "cabin_baggage_included": None,
+            "checked_baggage_included": None,
+            "checked_baggage_kg": None,
+            "currency": "EUR",
+        }
+        res_sun = evaluate_leg_baggage(
+            flight_data=sun_in,
+            cabin_req="1x8kg",
+            checked_req=20,
+            currency="EUR",
+        )
+        self.assertEqual(res_sun.cabin_cost, 0.0)
+        self.assertEqual(res_sun.checked_cost, 0.0)
+        self.assertEqual(res_sun.leg_baggage_cost, 0.0)
+        self.assertTrue(res_sun.leg_cost_known)
+        self.assertIn("SunExpress SunValue varsayımı", res_sun.checked_desc)
+
+        # 30 kg için SunEco+ (+€15)
+        res_sun_30 = evaluate_leg_baggage(
+            flight_data=sun_in,
+            cabin_req="none",
+            checked_req=30,
+            currency="EUR",
+        )
+        self.assertEqual(res_sun_30.cabin_cost, 0.0)
+        self.assertEqual(res_sun_30.checked_cost, 15.0)
+        self.assertEqual(res_sun_30.leg_baggage_cost, 15.0)
+        self.assertTrue(res_sun_30.leg_cost_known)
+        self.assertIn("SunEco+", res_sun_30.checked_desc)
+
+        # 3) Kombinasyon oluşturma ve toplam bagaj hesabı
+        f_ajet_out = FlightOption(
+            origin="ESB",
+            destination="DUS",
+            date="2026-11-15",
+            airline="AJet",
+            departure_time="10:00",
+            arrival_time="13:00",
+            duration="3 sa",
+            duration_minutes=180,
+            stops=0,
+            stops_text="Aktarmasız",
+            price=100.0,
+            currency="EUR",
+            booking_url="https://example.com/out",
+            arrival_day_offset=0,
+            arrival_date="2026-11-15",
+        )
+        f_sun_in = FlightOption(
+            origin="DUS",
+            destination="ESB",
+            date="2026-11-20",
+            airline="SunExpress",
+            departure_time="14:00",
+            arrival_time="19:00",
+            duration="4 sa",
+            duration_minutes=240,
+            stops=0,
+            stops_text="Aktarmasız",
+            price=80.0,
+            currency="EUR",
+            booking_url="https://example.com/in",
+            arrival_day_offset=0,
+            arrival_date="2026-11-20",
+        )
+
+        df_combo = build_combinations_dataframe(
+            outbound_flights=[f_ajet_out],
+            inbound_flights=[f_sun_in],
+            min_stay_days=5,
+            max_stay_days=5,
+            expected_currency="EUR",
+            out_cabin_req="1x8kg",
+            out_checked_req=20,
+            in_cabin_req="1x8kg",
+            in_checked_req=20,
+        )
+        self.assertEqual(len(df_combo), 1)
+        row = df_combo.iloc[0]
+        self.assertEqual(row["out_baggage_cost"], 40.0)
+        self.assertEqual(row["in_baggage_cost"], 0.0)
+        self.assertEqual(row["baggage_total_price"], 40.0)
+        self.assertTrue(row["baggage_cost_known"])
+        self.assertEqual(row["grand_total_price"], 220.0)
+
+        # 4) Doğrulanmış teklif önceliği: teklifte kabin onaylı ise €0
+        f_verified_out = FlightOption(
+            origin="ESB",
+            destination="DUS",
+            date="2026-11-15",
+            airline="AJet",
+            departure_time="10:00",
+            arrival_time="13:00",
+            duration="3 sa",
+            duration_minutes=180,
+            stops=0,
+            stops_text="Aktarmasız",
+            price=110.0,
+            currency="EUR",
+            booking_url="https://example.com/out2",
+            arrival_day_offset=0,
+            arrival_date="2026-11-15",
+            cabin_baggage_included=True,
+            checked_baggage_included=True,
+            checked_baggage_kg=20,
+        )
+        df_verified = build_combinations_dataframe(
+            outbound_flights=[f_verified_out],
+            inbound_flights=[f_sun_in],
+            min_stay_days=5,
+            max_stay_days=5,
+            expected_currency="EUR",
+            out_cabin_req="1x8kg",
+            out_checked_req=20,
+            in_cabin_req="none",
+            in_checked_req=10,
+        )
+        self.assertEqual(df_verified.iloc[0]["out_baggage_cost"], 0.0)
+        self.assertEqual(df_verified.iloc[0]["baggage_total_price"], 0.0)
+
+        # 5) Pegasus: Kampanya rakamları otomatik tahmin olarak uygulanmaz (unknown kalır)
+        pegasus_out = {
+            "origin": "SAW",
+            "destination": "DUS",
+            "airline": "Pegasus",
+            "stops": 0,
+            "currency": "EUR",
+        }
+        res_pgs = evaluate_leg_baggage(pegasus_out, cabin_req="1x8kg", checked_req=20, currency="EUR")
+        self.assertIsNone(res_pgs.cabin_cost)
+        self.assertIsNone(res_pgs.checked_cost)
+        self.assertFalse(res_pgs.leg_cost_known)
+        self.assertEqual(res_pgs.cabin_status, "unknown")
+
+        # 6) THY: EcoFly kabin dahil, uçak altı belirsiz (unknown)
+        thy_out = {
+            "origin": "IST",
+            "destination": "AMS",
+            "airline": "Turkish Airlines",
+            "stops": 0,
+            "currency": "EUR",
+        }
+        res_thy = evaluate_leg_baggage(thy_out, cabin_req="1x8kg", checked_req=20, currency="EUR")
+        self.assertEqual(res_thy.cabin_cost, 0.0)
+        self.assertEqual(res_thy.cabin_status, "included")
+        self.assertIsNone(res_thy.checked_cost)
+        self.assertFalse(res_thy.leg_cost_known)
+
+        # 7) Kur çarpanı yoksa EUR referansı TRY toplamına eklenmez (unknown kalır)
+        res_no_fx = evaluate_leg_baggage(ajet_out, cabin_req="1x8kg", checked_req=20, currency="TRY", manual_eur_rate=None)
+        self.assertIsNone(res_no_fx.cabin_cost)
+        self.assertFalse(res_no_fx.leg_cost_known)
+
+        # Kur çarpanı girilirse (1 EUR = 38 TRY) dönüştürülür
+        res_with_fx = evaluate_leg_baggage(ajet_out, cabin_req="1x8kg", checked_req=20, currency="TRY", manual_eur_rate=38.0)
+        self.assertEqual(res_with_fx.cabin_cost, 570.0)    # 15 * 38
+        self.assertEqual(res_with_fx.checked_cost, 950.0)  # 25 * 38
+        self.assertEqual(res_with_fx.leg_baggage_cost, 1520.0)
+        self.assertTrue(res_with_fx.leg_cost_known)
+
+        # 8) Sıralama: Bagaj maliyeti belirsiz olanlar bilinenlerin önüne geçemez!
+        f_known_higher_base = FlightOption(
+            origin="ESB", destination="DUS", date="2026-11-15", airline="Turkish Airlines",
+            departure_time="09:00", arrival_time="12:00", duration="3 sa", duration_minutes=180,
+            stops=0, stops_text="Aktarmasız", price=120.0, currency="EUR",
+            booking_url="https://example.com/thy", arrival_day_offset=0, arrival_date="2026-11-15",
+            cabin_baggage_included=True, checked_baggage_included=True, checked_baggage_kg=20
+        )
+        f_known_lower_base = FlightOption(
+            origin="ESB", destination="DUS", date="2026-11-15", airline="AJet",
+            departure_time="10:00", arrival_time="13:00", duration="3 sa", duration_minutes=180,
+            stops=0, stops_text="Aktarmasız", price=90.0, currency="EUR",
+            booking_url="https://example.com/ajet", arrival_day_offset=0, arrival_date="2026-11-15",
+        )
+        f_unknown_bag = FlightOption(
+            origin="ESB", destination="DUS", date="2026-11-15", airline="Pegasus",
+            departure_time="08:00", arrival_time="11:00", duration="3 sa", duration_minutes=180,
+            stops=0, stops_text="Aktarmasız", price=50.0, currency="EUR",
+            booking_url="https://example.com/pgs", arrival_day_offset=0, arrival_date="2026-11-15",
+        )
+        f_return_free = FlightOption(
+            origin="DUS", destination="ESB", date="2026-11-20", airline="SunExpress",
+            departure_time="14:00", arrival_time="19:00", duration="4 sa", duration_minutes=240,
+            stops=0, stops_text="Aktarmasız", price=50.0, currency="EUR",
+            booking_url="https://example.com/in", arrival_day_offset=0, arrival_date="2026-11-20",
+            cabin_baggage_included=True, checked_baggage_included=True, checked_baggage_kg=20
+        )
+
+        df_sorted = build_combinations_dataframe(
+            outbound_flights=[f_unknown_bag, f_known_lower_base, f_known_higher_base],
+            inbound_flights=[f_return_free],
+            min_stay_days=5,
+            max_stay_days=5,
+            expected_currency="EUR",
+            out_cabin_req="1x8kg",
+            out_checked_req=20,
+            in_cabin_req="none",
+            in_checked_req=0,
+        )
+        # THY: base €120 + return €50 + bag €0 = €170 (known)
+        # AJet: base €90 + return €50 + bag €40 = €180 (known)
+        # Pegasus: base €50 + return €50 + bag unknown = €100 (unknown)
+        # Sıralama: THY (€170, known) önce gelmeli, ardından AJet (€180, known), en son Pegasus (unknown)!
+        self.assertEqual(len(df_sorted), 3)
+        self.assertEqual(df_sorted.iloc[0]["out_airline"], "Turkish Airlines")
+        self.assertEqual(df_sorted.iloc[0]["grand_total_price"], 170.0)
+        self.assertTrue(df_sorted.iloc[0]["baggage_cost_known"])
+
+        self.assertEqual(df_sorted.iloc[1]["out_airline"], "AJet")
+        self.assertEqual(df_sorted.iloc[1]["grand_total_price"], 180.0)
+        self.assertTrue(df_sorted.iloc[1]["baggage_cost_known"])
+
+        self.assertEqual(df_sorted.iloc[2]["out_airline"], "Pegasus")
+        self.assertFalse(df_sorted.iloc[2]["baggage_cost_known"])
+
+        # 9) 'Bu yönde bagaj dahil olsun' filtresi doğrulanmamış uçuşları eler
+        df_filtered_inc = build_combinations_dataframe(
+            outbound_flights=[f_unknown_bag, f_known_lower_base, f_known_higher_base],
+            inbound_flights=[f_return_free],
+            min_stay_days=5,
+            max_stay_days=5,
+            expected_currency="EUR",
+            out_cabin_req="1x8kg",
+            out_checked_req=20,
+            out_baggage_included_only=True,
+            in_cabin_req="none",
+            in_checked_req=0,
+        )
+        # Yalnızca THY (teklifte onaylı 8kg kabin ve 20kg bagajı olan) geçer
+        self.assertEqual(len(df_filtered_inc), 1)
+        self.assertEqual(df_filtered_inc.iloc[0]["out_airline"], "Turkish Airlines")
 
 
 if __name__ == "__main__":

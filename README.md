@@ -8,13 +8,14 @@ Uygulama bilgisayarınızda çalışır. Uçuş verilerini Playwright aracılı�
 
 ## Özellikler
 
-- Tek çıkış/geri dönüş noktası ve en fazla **3 hedef havalimanı**.
+- Tek çıkış/geri dönüş noktası ve en fazla **4 hedef havalimanı**.
 - Esnek seyahat penceresi ve minimum/maksimum kalış gecesi.
 - Aynı veya farklı havalimanlarından gidiş-dönüş kombinasyonları.
-- Gidiş ve dönüş için ayrı aktarma sınırları, kalkış saati ve yolculuk süresi filtreleri.
-- İsteğe bağlı tahmini bagaj ve kara ulaşımı ücretleri; manuel döviz kuru.
-- Toplam maliyete, eşitlikte yolculuk süresine göre sıralama.
-- Günlük disk önbelleği, tarama ilerlemesi ve sorgu durumları.
+- Gidiş ve dönüş için ayrı aktarma ve havayolu filtreleri; kalkış saati, tek yön ve toplam yolculuk süresi sınırları.
+- İsteğe bağlı tahmini kara ulaşımı transfer ücretleri; manuel döviz kuru (`1 EUR -> TRY/USD`).
+- Gidiş ve dönüş için bağımsız bagaj seçenekleri (üst dolap kabin valizi, 5/10/15/20 kg uçak altı bagaj kademeleri, Türkiye–Avrupa havayolu paket referansları, isteğe bağlı dahil olma filtresi ve manuel ek ücret alanları).
+- Toplam maliyete, eşitlikte yolculuk süresine göre sıralama (bagaj maliyeti belirsiz olan seçenekler bilinenlerin önüne haksız geçemez).
+- 48 saatlik disk önbelleği, tarama ilerlemesi ve sorgu durumları.
 - Taramayı durdurma ve önbellekteki kullanılabilir sonuçlardan devam etme.
 - Seçili kombinasyonun fiyatını yeniden arama, Google Flights arama bağlantıları ve CSV dışa aktarma.
 - Yerel web arayüzü ve alternatif Streamlit arayüzü.
@@ -57,7 +58,7 @@ Ana kullanım için `server.py` ile açılan web arayüzü tercih edilir. İki a
 ## Kullanım
 
 1. Çıkış havalimanını girin: örneğin **ESB**.
-2. Hedef bölgeyi ve en fazla üç havalimanını seçin: **AMS, DUS, CGN**.
+2. Hedef bölgeyi ve en fazla dört havalimanını seçin: **AMS, DUS, CGN**.
 3. En erken gidiş ve eve en geç varış tarihini belirleyin.
 4. Hedefte kalmak istediğiniz gece aralığını girin: örneğin **4–6 gece**.
 5. Para birimini ve tarama ayarlarını seçip taramayı başlatın. İlk denemede kısa bir tarih aralığı kullanın.
@@ -79,7 +80,7 @@ Toplam yolculuk süresi filtresi gidiş ve dönüş uçuş sürelerinin toplamı
 ```text
 Rota ve tarih seçimi
         ↓
-Gidiş/dönüş tek yön sorguları → Günlük önbellek
+Gidiş/dönüş tek yön sorguları → 48 saatlik önbellek
         ↓
 Toplanan uçuşları yerelde eşleştirme
         ↓
@@ -92,7 +93,7 @@ Aktarmalı seçenekler Google Flights sonuçlarından alınır. Uygulama bağım
 
 ## Önbellek ve tarama durumları
 
-`flight_cache.json`, sorguları havalimanları, tarih ve para birimi bazında saklar. Aynı günün kullanılabilir ve yeterli kapsamlı kayıtları yeniden kullanılır. Dosya Git tarafından dışlanır.
+`flight_cache.json`, sorguları havalimanları, tarih ve para birimi bazında saklar. Son 48 saat içindeki kullanılabilir ve yeterli kapsamlı kayıtlar yeniden kullanılır; bu sürenin dışındaki kayıtlar geçersiz sayılır. Dosya Git tarafından dışlanır.
 
 | Durum | Anlamı |
 | --- | --- |
@@ -102,7 +103,19 @@ Aktarmalı seçenekler Google Flights sonuçlarından alınır. Uygulama bağım
 | `blocked` | Erişim engeli ya da CAPTCHA tespit edildi. |
 | `parse_error` | Sayfa verisi beklenen biçimde okunamadı. |
 
-Hatalı veya eksik sorgular varsa tarama kapsamını kontrol edin. Günlük önbellek canlı fiyat garantisi vermez; yeniden kontrol veya önbelleği temizleme işlemiyle fiyatları tekrar sorgulayabilirsiniz.
+Hatalı veya eksik sorgular varsa tarama kapsamını kontrol edin. Önbellek canlı fiyat garantisi vermez. Seçili kombinasyonun **Fiyatı Yeniden Kontrol Et** düğmesi, ilgili iki rota/gün için önbelleği atlayarak yeniden arama yapar.
+
+**Önbelleği Temizle (Bugün Hariç Sil)** düğmesi bugünkü kayıtları korur, önceki günlere ait kayıtları siler. Bu işlem bugünkü fiyatları yenilemez.
+
+Kapsam göstergeleri farklı anlamlara gelir:
+
+| Alan | Anlamı |
+| --- | --- |
+| `limit_reached` | İstenen sayıda tekil uçuşa ulaşıldı mı? |
+| `all_loaded_parsed` | Yüklenen kartların fiyatları okunabildi mi? |
+| `scope_complete` | Genişletme zaman aşımı veya kalan ek sonuç düğmesi olmadan, yüklenen kartların fiyatları okunabildi mi? |
+
+Bu göstergeler bagaj, segment veya varış tarihi gibi her ayrıntının doğrulandığını ya da piyasadaki tüm uçuşların kapsandığını garanti etmez. Toplanan uçuşlar filtrelenmeden önce sonuç limitiyle kesilmez; görüntüleme limiti filtreleme ve sıralamadan sonra uygulanır.
 
 ## Sınırlamalar
 
@@ -115,15 +128,14 @@ Bu proje kişisel kullanım için geliştirilen bir prototiptir; Google veya hav
 - Transfer ücretleri, süreleri ve manuel kur tahminidir; güncel sefer saatlerini, gece ulaşımını ve bağlantı uygunluğunu ayrıca kontrol edin.
 - Ayrı tek yön biletler bağımsız satın alınır. Birini alırken diğerinin fiyatı veya uygunluğu değişebilir.
 
-### İncelemede belirlenen açık noktalar
+### Veri doğrulama davranışı
 
-Son kod incelemesinde aşağıdaki durumlar tespit edilmiştir; ilgili regresyon testleriyle doğrulanarak giderilmeleri gerekir:
+- Bagaj metinlerindeki olumsuz ifadeler dikkate alınır. Bağımsız olumlu ve olumsuz bilgiler çelişiyorsa veya bilgi yoksa bagaj durumu bilinmiyor olarak bırakılır.
+- Yeniden fiyat kontrolünde farklı uçuş numaraları reddedilir; saat, varış günü ve mevcut aktarma bilgileri karşılaştırılır. Yetersiz veya belirsiz kimlikte **Uçuş kimliği doğrulanamadı** sonucu gösterilir.
+- `+1`, `+2`, “ertesi gün” ve “next day” gibi varış işaretleri desteklenir. Bazı durumlarda saat/süre bağlamından çıkarım yapıldığından varış gününü satıcının ekranında ayrıca doğrulayın.
+- “Daha fazla uçuş” sonrasında gecikmeli yüklenen kartlar sınırlı süre beklenerek toplanır; genişletme zaman aşımında kapsam eksik olarak belirtilir.
 
-- “Kabin bagajı dahil değil” gibi olumsuz ifadelerin yanlışlıkla dahil sayılması.
-- Yeniden kontrolde farklı uçuş numaralarının benzer saatler üzerinden eşleşebilmesi.
-- Bazı ertesi gün varış ifadelerinde gün farkının yanlış okunması.
-- Filtrelemeden önce uygulanan sonuç limitinin uygun seçenekleri elemesi.
-- “Daha fazla uçuş” tıklaması sonrasında yüklenen kartların kaçırılabilmesi.
+Bu davranışlar önceki incelemede tespit edilen beş sorunun düzeltmelerini içerir. Desteklenmeyen sayfa biçimleri veya eksik veri için doğruluk garantisi verilmez.
 
 ## Testler
 
@@ -131,7 +143,9 @@ Son kod incelemesinde aşağıdaki durumlar tespit edilmiştir; ilgili regresyon
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-Testler sahte uçuş verileri, yerel HTML örnekleri ve bazı senaryolarda geçici yerel HTTP sunucusu kullanır. Testlerin geçmesi canlı Google Flights sayfasıyla uyumluluğun doğrulandığı anlamına gelmez. HTTP testleri için ortamın yerel bağlantılara izin vermesi gerekir.
+Testler sahte uçuş verileri, yerel HTML örnekleri, geçici yerel HTTP sunucusu ve gecikmeli kart yüklemesi için Playwright kullanır. Tarayıcı testleri için kurulumdaki Chromium indirme adımı tamamlanmalıdır.
+
+Paket; bagaj olumsuzluğu/çelişkisi, uçuş kimliği, gece aşımı, filtre öncesi sonuç kesilmesi, asenkron kart yüklemesi, dört hedef sınırı, 48 saatlik önbellek ve ayrı havayolu filtrelerini kapsar. Testlerin geçmesi canlı Google Flights sayfasıyla uyumluluğun doğrulandığı anlamına gelmez. HTTP testleri için ortamın yerel bağlantılara izin vermesi gerekir.
 
 ## Dosya yapısı
 
@@ -153,5 +167,5 @@ Testler sahte uçuş verileri, yerel HTML örnekleri ve bazı senaryolarda geçi
 | Tarayıcı başlatılamıyor | Sanal ortamın Python’u ile `-m playwright install chromium` komutunu çalıştırın. |
 | Yerel sayfa açılmıyor | `server.py` terminalinin açık olduğunu ve 8000 portunun başka süreçte kullanılmadığını kontrol edin. |
 | Sonuç çıkmıyor | Tarih/gece aralığını, filtreleri ve sorgu durumlarını inceleyin. “Uçuş yok” ile tarama hatasını ayırın. |
-| Fiyat eski görünüyor | Seçili kombinasyonu yeniden kontrol edin veya önbelleği temizleyip yeniden tarayın. |
+| Fiyat eski görünüyor | Seçili kombinasyonu yeniden kontrol edin. Temizleme düğmesinin bugünkü kayıtları koruduğunu unutmayın. |
 | CAPTCHA veya erişim engeli | Taramayı durdurup daha sonra deneyin; engeli aşmaya yönelik otomasyon kullanmayın. |

@@ -668,8 +668,12 @@
           <option value="IST">IST — İstanbul Havalimanı</option>
           <option value="ADB">ADB — İzmir Adnan Menderes</option>
           <option value="AYT">AYT — Antalya</option>
+          <option value="DLM">DLM — Dalaman / Muğla</option>
+          <option value="BJV">BJV — Bodrum Milas</option>
           <option value="COV">COV — Çukurova (Adana/Mersin)</option>
           <option value="TZX">TZX — Trabzon</option>
+          <option value="GZT">GZT — Gaziantep</option>
+          <option value="ASR">ASR — Kayseri Erkilet</option>
         </select>
       </div>
 
@@ -680,8 +684,8 @@
 
       <div class="field">
         <div style="display: flex; justify-content: space-between; align-items: center;">
-          <label>🛬 Hedef Havalimanları (En Fazla 3)</label>
-          <span id="selectedAirportCount" style="font-size: 0.74rem; color: #93c5fd; font-weight: 600;">3 / 3 seçili</span>
+          <label>🛬 Hedef Havalimanları (En Fazla 4)</label>
+          <span id="selectedAirportCount" style="font-size: 0.74rem; color: #93c5fd; font-weight: 600;">0 / 4 seçili</span>
         </div>
         <div id="airportChecklist" class="airport-checklist"></div>
         <div class="custom-airport-row">
@@ -712,10 +716,16 @@
         </div>
       </div>
 
+      <div style="margin-top: 2px; margin-bottom: 8px;">
+        <button type="button" id="sidebarWeekendBtn" onclick="toggleQuickWeekend()" style="width: 100%; background: var(--panel); border: 1px solid var(--border); color: #cbd5e1; font-size: 0.80rem; padding: 7px 10px; border-radius: 8px; cursor: pointer; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 6px; transition: all 0.2s;">
+          <span>🏖️ Tatile Haftasonunu Dahil Et</span>
+        </button>
+      </div>
+
       <div class="grid-2">
         <div class="field">
           <label>Para Birimi</label>
-          <select id="currency">
+          <select id="currency" onchange="onCurrencyChange()">
             <option value="TRY" selected>TRY (₺)</option>
             <option value="EUR">EUR (€)</option>
             <option value="USD">USD ($)</option>
@@ -833,7 +843,7 @@
           </div>
           <div style="display: flex; gap: 8px;">
             <button type="button" class="btn-secondary" onclick="resetPostFilters()">🔄 Filtreleri Sıfırla</button>
-            <button type="button" class="btn-primary" style="width: auto; padding: 8px 16px;" onclick="switchTab('cards')">
+            <button type="button" id="seeResultsBtn" class="btn-primary" style="width: auto; padding: 8px 16px;" onclick="switchTab('cards')">
               ✅ Sonuçları Gör
             </button>
           </div>
@@ -939,57 +949,154 @@
               <input type="checkbox" id="onlyAsymmetric" onchange="recombine()" />
               Sadece asimetrik rotaları göster (Farklı havalimanından dönüş)
             </label>
+
+            <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-top: 2px;">
+              <button type="button" id="quickWeekendBtn" onclick="toggleQuickWeekend()" style="background: var(--panel); border: 1px solid var(--border); color: #cbd5e1; font-size: 0.74rem; padding: 6px 12px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 6px; font-weight: 600; transition: all 0.2s;">
+                <span>🏖️ Tatile Haftasonunu Dahil Et (Cmt &amp; Paz)</span>
+              </button>
+            </div>
+
+            <label class="checkbox-row" style="margin-top: 2px;">
+              <input type="checkbox" id="includeWeekend" onchange="syncWeekendToggle('checkbox'); recombine();" />
+              🏖️ Tatile haftasonunu dahil et (Hem Cumartesi hem Pazar hedefte geçirilsin)
+            </label>
           </div>
 
           <!-- SÜTUN 2: BAGAJ & KARA ULAŞIMI -->
-          <div style="background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 15px; display: flex; flex-direction: column; gap: 12px;">
-            <div class="section-title">🧳 Bagaj &amp; 🚆 Tahmini Kara Ulaşımı</div>
+          <div style="background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 15px; display: flex; flex-direction: column; gap: 14px;">
+            <div class="section-title">🧳 Bağımsız Bagaj &amp; 🚆 Kara Ulaşımı</div>
 
-            <div class="field">
-              <label>Bagaj Filtresi &amp; Tahmini Ek Ücret</label>
-              <select id="baggageMode" onchange="toggleBaggageFeeInputs(); recombine();">
-                <option value="none" selected>Baz Fiyat (Ek Bagaj Ücreti Ekleme)</option>
-                <option value="add_cabin_bag">Kabin Bagajı Tahmini Ekle (Manuel Tutar)</option>
-                <option value="add_checked_bag">Uçak Altı Bagaj Tahmini Ekle (Manuel Tutar)</option>
-                <option value="free_cabin_only">Yalnızca Kabin Bagajı Doğrulanmış Teklifler</option>
-              </select>
-            </div>
-
-            <div id="baggageFeeBox" class="grid-2" style="display: none;">
-              <div class="field">
-                <label>Tahmini Kabin Bagajı (Tek Yön)</label>
-                <input type="number" id="cabinBagFee" value="650" min="0" step="50" onchange="recombine()" />
+            <!-- GİDİŞ BAGAJI BÖLÜMÜ -->
+            <div style="background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 12px; display: flex; flex-direction: column; gap: 10px;">
+              <div style="font-weight: 700; font-size: 0.88rem; color: #93c5fd; display: flex; align-items: center; justify-content: space-between;">
+                <span>🛫 Gidiş Bagajı</span>
               </div>
-              <div class="field">
-                <label>Tahmini Alt Bagaj (Tek Yön)</label>
-                <input type="number" id="checkedBagFee" value="1100" min="0" step="50" onchange="recombine()" />
-              </div>
-            </div>
 
-            <div class="section-title" style="margin-top: 4px;">🚆 Havalimanı → Hedef Şehir Transfer Tahmini</div>
-
-            <label class="checkbox-row">
-              <input type="checkbox" id="includeTransfer" onchange="toggleTransferBox(); recombine();" />
-              Tahmini tren/otobüs transfer maliyetini toplama ekle
-            </label>
-
-            <div id="transferBox" class="transfer-box" style="display: none; background: var(--panel);">
-              <div class="field">
-                <label>Manuel Kur Çarpanı (1 EUR = ? Seçili Para Birimi)</label>
-                <div style="display: flex; gap: 6px; align-items: center;">
-                  <input type="number" id="manualEurRate" value="1.0" min="0.01" step="0.5" style="width: 110px;" onchange="applyManualRateToTransfers()" />
-                  <button type="button" class="btn-secondary" onclick="applyManualRateToTransfers()">EUR Tahminlerini Çarp</button>
+              <div class="grid-2">
+                <div class="field">
+                  <label style="font-size: 0.78rem;">Üst Dolap Kabin Valizi</label>
+                  <select id="outCabinReq" onchange="recombine()">
+                    <option value="none" selected>Gerekmiyor</option>
+                    <option value="1x8kg">1 adet, 8 kg’a kadar</option>
+                  </select>
                 </div>
-                <span id="rateInfoLabel" style="font-size: 0.72rem; color: var(--muted);">
-                  Not: Sabit kur varsayılmaz. EUR referans değerlerini kendi kurunuzla çarpabilir veya aşağıdan doğrudan düzenleyebilirsiniz.
+                <div class="field">
+                  <label style="font-size: 0.78rem;">Uçak Altı Bagajı</label>
+                  <select id="outCheckedReq" onchange="recombine()">
+                    <option value="0" selected>Gerekmiyor</option>
+                    <option value="5">5 kg</option>
+                    <option value="10">10 kg</option>
+                    <option value="15">15 kg</option>
+                    <option value="20">20 kg (SunValue vb. dahil)</option>
+                    <option value="30">30 kg (SunEco+ vb.)</option>
+                    <option value="35">35 kg (SunComfort vb.)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div style="font-size: 0.73rem; color: var(--muted); background: var(--bg); padding: 6px 9px; border-radius: 6px; border: 1px solid var(--border);">
+                ℹ️ <b>Kişisel çanta:</b> Koltuk altı çantası havayolu kuralına göre fiyata dahildir; üst dolap kabin valizi ihtiyacını karşılamaz.
+              </div>
+
+              <label class="checkbox-row" style="margin-top: 1px;">
+                <input type="checkbox" id="outBaggageIncludedOnly" onchange="recombine()" />
+                <span style="font-size: 0.78rem;">Bu yönde seçili bagajlar teklife dahil olsun</span>
+              </label>
+
+              <details style="font-size: 0.75rem; color: var(--muted); margin-top: 2px;">
+                <summary style="cursor: pointer; color: #93c5fd;">Manuel Ek Ücret Girişi (İsteğe bağlı)</summary>
+                <div class="grid-2" style="margin-top: 6px;">
+                  <div class="field">
+                    <label style="font-size: 0.72rem;">Kabin Ek Ücreti</label>
+                    <input type="number" id="outManualCabinFee" placeholder="Boş = Otomatik / Bilinmiyor" min="0" step="10" onchange="recombine()" />
+                  </div>
+                  <div class="field">
+                    <label style="font-size: 0.72rem;">Alt Bagaj Ek Ücreti</label>
+                    <input type="number" id="outManualCheckedFee" placeholder="Boş = Otomatik / Bilinmiyor" min="0" step="10" onchange="recombine()" />
+                  </div>
+                </div>
+              </details>
+            </div>
+
+            <!-- DÖNÜŞ BAGAJI BÖLÜMÜ -->
+            <div style="background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 12px; display: flex; flex-direction: column; gap: 10px;">
+              <div style="font-weight: 700; font-size: 0.88rem; color: #93c5fd; display: flex; align-items: center; justify-content: space-between;">
+                <span>🛬 Dönüş Bagajı</span>
+              </div>
+
+              <div class="grid-2">
+                <div class="field">
+                  <label style="font-size: 0.78rem;">Üst Dolap Kabin Valizi</label>
+                  <select id="inCabinReq" onchange="recombine()">
+                    <option value="none" selected>Gerekmiyor</option>
+                    <option value="1x8kg">1 adet, 8 kg’a kadar</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label style="font-size: 0.78rem;">Uçak Altı Bagajı</label>
+                  <select id="inCheckedReq" onchange="recombine()">
+                    <option value="0" selected>Gerekmiyor</option>
+                    <option value="5">5 kg</option>
+                    <option value="10">10 kg</option>
+                    <option value="15">15 kg</option>
+                    <option value="20">20 kg (SunValue vb. dahil)</option>
+                    <option value="30">30 kg (SunEco+ vb.)</option>
+                    <option value="35">35 kg (SunComfort vb.)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div style="font-size: 0.73rem; color: var(--muted); background: var(--bg); padding: 6px 9px; border-radius: 6px; border: 1px solid var(--border);">
+                ℹ️ <b>Kişisel çanta:</b> Koltuk altı çantası havayolu kuralına göre fiyata dahildir; üst dolap kabin valizi ihtiyacını karşılamaz.
+              </div>
+
+              <label class="checkbox-row" style="margin-top: 1px;">
+                <input type="checkbox" id="inBaggageIncludedOnly" onchange="recombine()" />
+                <span style="font-size: 0.78rem;">Bu yönde seçili bagajlar teklife dahil olsun</span>
+              </label>
+
+              <details style="font-size: 0.75rem; color: var(--muted); margin-top: 2px;">
+                <summary style="cursor: pointer; color: #93c5fd;">Manuel Ek Ücret Girişi (İsteğe bağlı)</summary>
+                <div class="grid-2" style="margin-top: 6px;">
+                  <div class="field">
+                    <label style="font-size: 0.72rem;">Kabin Ek Ücreti</label>
+                    <input type="number" id="inManualCabinFee" placeholder="Boş = Otomatik / Bilinmiyor" min="0" step="10" onchange="recombine()" />
+                  </div>
+                  <div class="field">
+                    <label style="font-size: 0.72rem;">Alt Bagaj Ek Ücreti</label>
+                    <input type="number" id="inManualCheckedFee" placeholder="Boş = Otomatik / Bilinmiyor" min="0" step="10" onchange="recombine()" />
+                  </div>
+                </div>
+              </details>
+            </div>
+
+            <!-- KUR VE TRANSFER BÖLÜMÜ -->
+            <div style="background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 12px; display: flex; flex-direction: column; gap: 8px;">
+              <div class="field">
+                <label style="font-size: 0.78rem;">💱 Manuel Kur Çarpanı (1 EUR = ? Seçili Para Birimi)</label>
+                <div style="display: flex; gap: 6px; align-items: center;">
+                  <input type="number" id="manualEurRate" value="38.5" placeholder="Örn: 38.5" min="0.01" step="0.5" style="width: 140px;" onchange="applyManualRateToTransfers(); recombine();" />
+                  <button type="button" class="btn-secondary" style="font-size: 0.74rem; padding: 5px 10px;" onclick="applyManualRateToTransfers(); recombine();">Kuru Uygula</button>
+                </div>
+                <span id="rateInfoLabel" style="font-size: 0.70rem; color: var(--muted);">
+                  Sabit kur varsayılmaz. EUR bazlı bagaj ve transfer referanslarını para biriminize çevirmek için kur girin.
                 </span>
               </div>
-              <div style="font-size: 0.74rem; color: var(--muted); display: grid; grid-template-columns: 50px 1fr 1fr; gap: 8px; margin-top: 4px;">
-                <span>Kod</span>
-                <span>Tahmini Tek Yön Ücret</span>
-                <span>Tahmini Süre (dk)</span>
+
+              <div class="section-title" style="margin-top: 4px; font-size: 0.82rem;">🚆 Havalimanı → Hedef Şehir Transfer Tahmini</div>
+              <label class="checkbox-row">
+                <input type="checkbox" id="includeTransfer" onchange="toggleTransferBox(); recombine();" />
+                <span style="font-size: 0.78rem;">Tahmini tren/otobüs transfer maliyetini toplama ekle</span>
+              </label>
+
+              <div id="transferBox" class="transfer-box" style="display: none; background: var(--bg); margin-top: 4px;">
+                <div style="font-size: 0.72rem; color: var(--muted); display: grid; grid-template-columns: 50px 1fr 1fr; gap: 8px;">
+                  <span>Kod</span>
+                  <span>Tahmini Tek Yön Ücret</span>
+                  <span>Tahmini Süre (dk)</span>
+                </div>
+                <div id="transferInputs"></div>
               </div>
-              <div id="transferInputs"></div>
             </div>
           </div>
 
@@ -1059,21 +1166,45 @@
   </div>
 
   <script>
-    const MAX_TARGET_AIRPORTS = 3;
+    const MAX_TARGET_AIRPORTS = 4;
+
+    const KNOWN_AIRPORT_NAMES = {
+      // Türkiye Havalimanları
+      "ESB": "Ankara Esenboğa",
+      "SAW": "İstanbul Sabiha Gökçen",
+      "IST": "İstanbul Havalimanı",
+      "ADB": "İzmir Adnan Menderes",
+      "AYT": "Antalya",
+      "DLM": "Dalaman / Muğla",
+      "BJV": "Bodrum Milas",
+      "COV": "Çukurova (Adana/Mersin)",
+      "ADA": "Adana Şakirpaşa",
+      "TZX": "Trabzon",
+      "GZT": "Gaziantep",
+      "ASR": "Kayseri Erkilet",
+      "NAV": "Kapadokya Nevşehir",
+      "DIY": "Diyarbakır",
+      "VAN": "Van Ferit Melen",
+      "ERZ": "Erzurum",
+      "SZF": "Samsun Çarşamba",
+      "KYA": "Konya",
+      "ECN": "Ercan (Kıbrıs)"
+    };
 
     const CITY_PRESETS = [
       {
         id: "eindhoven",
         label: "🇳🇱 Eindhoven / Güney Hollanda",
         airports: [
+          { code: "EIN", name: "Eindhoven", dist: "8 km", cost_eur: 5, duration_min: 20, checked: true },
           { code: "AMS", name: "Amsterdam Schiphol", dist: "120 km", cost_eur: 23, duration_min: 80, checked: true },
           { code: "DUS", name: "Düsseldorf", dist: "110 km", cost_eur: 19, duration_min: 105, checked: true },
           { code: "CGN", name: "Köln / Bonn", dist: "150 km", cost_eur: 25, duration_min: 150, checked: true },
-          { code: "EIN", name: "Eindhoven", dist: "8 km", cost_eur: 5, duration_min: 20, checked: false },
           { code: "BRU", name: "Brüksel Zaventem", dist: "115 km", cost_eur: 22, duration_min: 110, checked: false },
           { code: "CRL", name: "Brüksel Charleroi", dist: "155 km", cost_eur: 26, duration_min: 145, checked: false },
           { code: "NRN", name: "Weeze (Niederrhein)", dist: "60 km", cost_eur: 18, duration_min: 75, checked: false },
-          { code: "RTM", name: "Rotterdam / Lahey", dist: "110 km", cost_eur: 21, duration_min: 85, checked: false }
+          { code: "RTM", name: "Rotterdam / Lahey", dist: "110 km", cost_eur: 21, duration_min: 85, checked: false },
+          { code: "MST", name: "Maastricht Aachen", dist: "85 km", cost_eur: 16, duration_min: 75, checked: false }
         ]
       },
       {
@@ -1083,30 +1214,120 @@
           { code: "AMS", name: "Amsterdam Schiphol", dist: "15 km", cost_eur: 6, duration_min: 15, checked: true },
           { code: "RTM", name: "Rotterdam / Lahey", dist: "60 km", cost_eur: 15, duration_min: 50, checked: true },
           { code: "EIN", name: "Eindhoven", dist: "120 km", cost_eur: 23, duration_min: 85, checked: true },
-          { code: "DUS", name: "Düsseldorf", dist: "215 km", cost_eur: 29, duration_min: 135, checked: false },
-          { code: "BRU", name: "Brüksel Zaventem", dist: "195 km", cost_eur: 28, duration_min: 115, checked: false }
+          { code: "DUS", name: "Düsseldorf", dist: "215 km", cost_eur: 29, duration_min: 135, checked: true },
+          { code: "BRU", name: "Brüksel Zaventem", dist: "195 km", cost_eur: 28, duration_min: 115, checked: false },
+          { code: "NRN", name: "Weeze (Niederrhein)", dist: "160 km", cost_eur: 25, duration_min: 120, checked: false }
         ]
       },
       {
         id: "koln_dus",
         label: "🇩🇪 Köln / Düsseldorf / Ruhr Bölgesi",
         airports: [
-          { code: "CGN", name: "Köln / Bonn", dist: "15 km", cost_eur: 4, duration_min: 15, checked: true },
           { code: "DUS", name: "Düsseldorf", dist: "45 km", cost_eur: 12, duration_min: 35, checked: true },
+          { code: "CGN", name: "Köln / Bonn", dist: "15 km", cost_eur: 4, duration_min: 15, checked: true },
           { code: "DTM", name: "Dortmund", dist: "85 km", cost_eur: 16, duration_min: 75, checked: true },
-          { code: "FRA", name: "Frankfurt Main", dist: "170 km", cost_eur: 29, duration_min: 65, checked: false },
-          { code: "EIN", name: "Eindhoven", dist: "140 km", cost_eur: 22, duration_min: 130, checked: false }
+          { code: "FRA", name: "Frankfurt Main", dist: "170 km", cost_eur: 29, duration_min: 65, checked: true },
+          { code: "NRN", name: "Weeze (Niederrhein)", dist: "75 km", cost_eur: 18, duration_min: 80, checked: false },
+          { code: "EIN", name: "Eindhoven", dist: "140 km", cost_eur: 22, duration_min: 130, checked: false },
+          { code: "FMO", name: "Münster / Osnabrück", dist: "150 km", cost_eur: 24, duration_min: 110, checked: false },
+          { code: "LUX", name: "Lüksemburg", dist: "210 km", cost_eur: 28, duration_min: 150, checked: false }
         ]
       },
       {
-        id: "bruksel_brugge",
+        id: "frankfurt_hessen",
+        label: "🇩🇪 Frankfurt / Hessen / Ren",
+        airports: [
+          { code: "FRA", name: "Frankfurt Main", dist: "15 km", cost_eur: 6, duration_min: 15, checked: true },
+          { code: "HHN", name: "Frankfurt Hahn", dist: "120 km", cost_eur: 18, duration_min: 90, checked: true },
+          { code: "STR", name: "Stuttgart", dist: "200 km", cost_eur: 26, duration_min: 80, checked: true },
+          { code: "CGN", name: "Köln / Bonn", dist: "175 km", cost_eur: 29, duration_min: 65, checked: true },
+          { code: "FKB", name: "Karlsruhe / Baden-Baden", dist: "160 km", cost_eur: 24, duration_min: 85, checked: false },
+          { code: "NUE", name: "Nürnberg", dist: "225 km", cost_eur: 28, duration_min: 125, checked: false },
+          { code: "LUX", name: "Lüksemburg", dist: "230 km", cost_eur: 30, duration_min: 160, checked: false }
+        ]
+      },
+      {
+        id: "berlin_ost",
+        label: "🇩🇪 Berlin / Doğu Almanya & Dresden",
+        airports: [
+          { code: "BER", name: "Berlin Brandenburg", dist: "25 km", cost_eur: 4, duration_min: 30, checked: true },
+          { code: "LEJ", name: "Leipzig / Halle", dist: "170 km", cost_eur: 24, duration_min: 75, checked: true },
+          { code: "DRS", name: "Dresden", dist: "180 km", cost_eur: 26, duration_min: 110, checked: true },
+          { code: "HAM", name: "Hamburg", dist: "280 km", cost_eur: 32, duration_min: 105, checked: true },
+          { code: "POZ", name: "Poznań", dist: "260 km", cost_eur: 28, duration_min: 170, checked: false }
+        ]
+      },
+      {
+        id: "munih_bavyera",
+        label: "🇩🇪 Münih / Bavyera & Salzburg",
+        airports: [
+          { code: "MUC", name: "Münih", dist: "35 km", cost_eur: 13, duration_min: 40, checked: true },
+          { code: "FMM", name: "Memmingen / Allgäu", dist: "110 km", cost_eur: 16, duration_min: 80, checked: true },
+          { code: "NUE", name: "Nürnberg", dist: "170 km", cost_eur: 22, duration_min: 65, checked: true },
+          { code: "SZG", name: "Salzburg", dist: "145 km", cost_eur: 24, duration_min: 95, checked: true },
+          { code: "INN", name: "Innsbruck", dist: "165 km", cost_eur: 25, duration_min: 110, checked: false },
+          { code: "STR", name: "Stuttgart", dist: "220 km", cost_eur: 29, duration_min: 130, checked: false }
+        ]
+      },
+      {
+        id: "bruksel_belcika",
         label: "🇧🇪 Brüksel / Brugge / Gent / Anvers",
         airports: [
           { code: "BRU", name: "Brüksel Zaventem", dist: "12 km", cost_eur: 10, duration_min: 20, checked: true },
           { code: "CRL", name: "Brüksel Charleroi", dist: "55 km", cost_eur: 17, duration_min: 55, checked: true },
           { code: "EIN", name: "Eindhoven", dist: "115 km", cost_eur: 22, duration_min: 110, checked: true },
+          { code: "LIL", name: "Lille Lesquin", dist: "110 km", cost_eur: 20, duration_min: 80, checked: true },
           { code: "AMS", name: "Amsterdam Schiphol", dist: "190 km", cost_eur: 28, duration_min: 115, checked: false },
-          { code: "DUS", name: "Düsseldorf", dist: "200 km", cost_eur: 27, duration_min: 140, checked: false }
+          { code: "DUS", name: "Düsseldorf", dist: "200 km", cost_eur: 27, duration_min: 140, checked: false },
+          { code: "RTM", name: "Rotterdam / Lahey", dist: "140 km", cost_eur: 24, duration_min: 90, checked: false }
+        ]
+      },
+      {
+        id: "londra_ingiltere",
+        label: "🇬🇧 Londra & Güney İngiltere",
+        airports: [
+          { code: "STN", name: "London Stansted", dist: "60 km", cost_eur: 18, duration_min: 50, checked: true },
+          { code: "LTN", name: "London Luton", dist: "55 km", cost_eur: 16, duration_min: 45, checked: true },
+          { code: "LGW", name: "London Gatwick", dist: "45 km", cost_eur: 15, duration_min: 35, checked: true },
+          { code: "LHR", name: "London Heathrow", dist: "25 km", cost_eur: 8, duration_min: 35, checked: true },
+          { code: "SEN", name: "London Southend", dist: "70 km", cost_eur: 20, duration_min: 55, checked: false },
+          { code: "LCY", name: "London City", dist: "15 km", cost_eur: 5, duration_min: 25, checked: false },
+          { code: "BHX", name: "Birmingham", dist: "180 km", cost_eur: 32, duration_min: 90, checked: false }
+        ]
+      },
+      {
+        id: "paris_fransa",
+        label: "🇫🇷 Paris & Kuzey Fransa",
+        airports: [
+          { code: "CDG", name: "Paris Charles de Gaulle", dist: "25 km", cost_eur: 11, duration_min: 35, checked: true },
+          { code: "ORY", name: "Paris Orly", dist: "18 km", cost_eur: 10, duration_min: 30, checked: true },
+          { code: "BVA", name: "Paris Beauvais", dist: "85 km", cost_eur: 17, duration_min: 75, checked: true },
+          { code: "LIL", name: "Lille Lesquin", dist: "220 km", cost_eur: 28, duration_min: 65, checked: true },
+          { code: "BRU", name: "Brüksel Zaventem", dist: "300 km", cost_eur: 35, duration_min: 85, checked: false }
+        ]
+      },
+      {
+        id: "isvicre_alsace",
+        label: "🇨🇭 İsviçre & Alsace (Basel / Zürih / Cenevre)",
+        airports: [
+          { code: "BSL", name: "Basel Mulhouse Freiburg", dist: "10 km", cost_eur: 6, duration_min: 20, checked: true },
+          { code: "ZRH", name: "Zürih", dist: "85 km", cost_eur: 24, duration_min: 65, checked: true },
+          { code: "FKB", name: "Karlsruhe / Baden-Baden", dist: "170 km", cost_eur: 25, duration_min: 90, checked: true },
+          { code: "STR", name: "Stuttgart", dist: "220 km", cost_eur: 29, duration_min: 125, checked: true },
+          { code: "GVA", name: "Cenevre", dist: "250 km", cost_eur: 32, duration_min: 170, checked: false },
+          { code: "SXB", name: "Strasbourg", dist: "130 km", cost_eur: 22, duration_min: 80, checked: false }
+        ]
+      },
+      {
+        id: "viyana_budapeste",
+        label: "🇦🇹 Viyana / Bratislava / Budapeşte / Prag",
+        airports: [
+          { code: "VIE", name: "Viyana Schwechat", dist: "18 km", cost_eur: 5, duration_min: 20, checked: true },
+          { code: "BTS", name: "Bratislava", dist: "65 km", cost_eur: 10, duration_min: 60, checked: true },
+          { code: "BUD", name: "Budapeşte", dist: "240 km", cost_eur: 22, duration_min: 155, checked: true },
+          { code: "PRG", name: "Prag", dist: "330 km", cost_eur: 25, duration_min: 240, checked: true },
+          { code: "GRZ", name: "Graz", dist: "200 km", cost_eur: 22, duration_min: 150, checked: false },
+          { code: "BRQ", name: "Brno", dist: "140 km", cost_eur: 15, duration_min: 95, checked: false }
         ]
       },
       {
@@ -1115,19 +1336,110 @@
         airports: [
           { code: "BGY", name: "Milano Bergamo", dist: "50 km", cost_eur: 10, duration_min: 50, checked: true },
           { code: "MXP", name: "Milano Malpensa", dist: "48 km", cost_eur: 13, duration_min: 50, checked: true },
+          { code: "LIN", name: "Milano Linate", dist: "10 km", cost_eur: 5, duration_min: 20, checked: true },
           { code: "BLQ", name: "Bologna", dist: "210 km", cost_eur: 22, duration_min: 70, checked: true },
           { code: "VRN", name: "Verona", dist: "155 km", cost_eur: 18, duration_min: 80, checked: false },
-          { code: "VCE", name: "Venedik Marco Polo", dist: "265 km", cost_eur: 25, duration_min: 145, checked: false }
+          { code: "VCE", name: "Venedik Marco Polo", dist: "265 km", cost_eur: 25, duration_min: 145, checked: false },
+          { code: "TRN", name: "Torino", dist: "145 km", cost_eur: 17, duration_min: 65, checked: false }
         ]
       },
       {
-        id: "viyana_budapeste",
-        label: "🇦🇹 Viyana / Bratislava / Budapeşte",
+        id: "roma_orta_italya",
+        label: "🇮🇹 Roma / Toskana / Orta İtalya",
         airports: [
-          { code: "VIE", name: "Viyana Schwechat", dist: "18 km", cost_eur: 5, duration_min: 20, checked: true },
-          { code: "BTS", name: "Bratislava", dist: "65 km", cost_eur: 10, duration_min: 60, checked: true },
-          { code: "BUD", name: "Budapeşte", dist: "240 km", cost_eur: 22, duration_min: 155, checked: true },
-          { code: "PRG", name: "Prag", dist: "330 km", cost_eur: 25, duration_min: 240, checked: false }
+          { code: "FCO", name: "Roma Fiumicino", dist: "30 km", cost_eur: 14, duration_min: 35, checked: true },
+          { code: "CIA", name: "Roma Ciampino", dist: "15 km", cost_eur: 6, duration_min: 30, checked: true },
+          { code: "NAP", name: "Napoli", dist: "220 km", cost_eur: 24, duration_min: 75, checked: true },
+          { code: "PSA", name: "Pisa", dist: "340 km", cost_eur: 30, duration_min: 160, checked: true },
+          { code: "FLR", name: "Floransa", dist: "280 km", cost_eur: 28, duration_min: 95, checked: false },
+          { code: "BLQ", name: "Bologna", dist: "360 km", cost_eur: 32, duration_min: 135, checked: false }
+        ]
+      },
+      {
+        id: "barselona_katalonya",
+        label: "🇪🇸 Barselona / Katalonya & Costa Brava",
+        airports: [
+          { code: "BCN", name: "Barselona El Prat", dist: "15 km", cost_eur: 6, duration_min: 25, checked: true },
+          { code: "GRO", name: "Girona Costa Brava", dist: "95 km", cost_eur: 16, duration_min: 70, checked: true },
+          { code: "REU", name: "Reus", dist: "105 km", cost_eur: 16, duration_min: 80, checked: true },
+          { code: "VLC", name: "Valensiya", dist: "350 km", cost_eur: 32, duration_min: 180, checked: true },
+          { code: "PMI", name: "Palma de Mallorca", dist: "210 km", cost_eur: 35, duration_min: 50, checked: false }
+        ]
+      },
+      {
+        id: "madrid_ispanya",
+        label: "🇪🇸 Madrid & Orta İspanya",
+        airports: [
+          { code: "MAD", name: "Madrid Barajas", dist: "15 km", cost_eur: 5, duration_min: 25, checked: true },
+          { code: "VLC", name: "Valensiya", dist: "350 km", cost_eur: 28, duration_min: 110, checked: true },
+          { code: "ZAZ", name: "Zaragoza", dist: "315 km", cost_eur: 27, duration_min: 85, checked: true },
+          { code: "SVQ", name: "Sevilla", dist: "530 km", cost_eur: 38, duration_min: 160, checked: true }
+        ]
+      },
+      {
+        id: "polonya",
+        label: "🇵🇱 Polonya (Krakow / Katowice / Varşova)",
+        airports: [
+          { code: "KRK", name: "Krakow", dist: "15 km", cost_eur: 4, duration_min: 20, checked: true },
+          { code: "KTW", name: "Katowice", dist: "80 km", cost_eur: 12, duration_min: 65, checked: true },
+          { code: "WAW", name: "Varşova Chopin", dist: "290 km", cost_eur: 22, duration_min: 140, checked: true },
+          { code: "WRO", name: "Wrocław", dist: "270 km", cost_eur: 20, duration_min: 180, checked: true },
+          { code: "WMI", name: "Varşova Modlin", dist: "330 km", cost_eur: 26, duration_min: 190, checked: false }
+        ]
+      },
+      {
+        id: "kopenhag_iskandinavya",
+        label: "🇩🇰 Kopenhag & Güney İsveç (Malmö)",
+        airports: [
+          { code: "CPH", name: "Kopenhag Kastrup", dist: "10 km", cost_eur: 5, duration_min: 15, checked: true },
+          { code: "MMX", name: "Malmö Sturup", dist: "60 km", cost_eur: 15, duration_min: 45, checked: true },
+          { code: "BLL", name: "Billund", dist: "260 km", cost_eur: 30, duration_min: 170, checked: true },
+          { code: "GOT", name: "Göteborg Landvetter", dist: "310 km", cost_eur: 34, duration_min: 210, checked: true },
+          { code: "AAR", name: "Aarhus", dist: "300 km", cost_eur: 32, duration_min: 190, checked: false }
+        ]
+      },
+      {
+        id: "balkanlar",
+        label: "🇲🇰 Balkanlar (Üsküp / Priştine / Saraybosna / Tiran)",
+        airports: [
+          { code: "SKP", name: "Üsküp", dist: "20 km", cost_eur: 5, duration_min: 25, checked: true },
+          { code: "PRN", name: "Priştine", dist: "90 km", cost_eur: 10, duration_min: 85, checked: true },
+          { code: "TIA", name: "Tiran", dist: "290 km", cost_eur: 22, duration_min: 240, checked: true },
+          { code: "SJJ", name: "Saraybosna", dist: "420 km", cost_eur: 28, duration_min: 360, checked: true },
+          { code: "BEG", name: "Belgrad", dist: "430 km", cost_eur: 30, duration_min: 260, checked: false },
+          { code: "TGD", name: "Podgorica", dist: "340 km", cost_eur: 25, duration_min: 280, checked: false }
+        ]
+      },
+      {
+        id: "romanya_dogu_avrupa",
+        label: "🇷🇴 Romanya & Doğu Avrupa (Bükreş & Çevresi)",
+        airports: [
+          { code: "OTP", name: "Bükreş Otopeni", dist: "18 km", cost_eur: 4, duration_min: 25, checked: true },
+          { code: "BCM", name: "Bacău", dist: "290 km", cost_eur: 20, duration_min: 240, checked: true },
+          { code: "CLJ", name: "Cluj-Napoca", dist: "450 km", cost_eur: 28, duration_min: 360, checked: true },
+          { code: "VAR", name: "Varna", dist: "260 km", cost_eur: 22, duration_min: 210, checked: true },
+          { code: "SOF", name: "Sofya", dist: "380 km", cost_eur: 26, duration_min: 300, checked: false }
+        ]
+      },
+      {
+        id: "yunanistan_ege",
+        label: "🇬🇷 Yunanistan (Atina & Selanik & Ege)",
+        airports: [
+          { code: "ATH", name: "Atina Eleftherios Venizelos", dist: "35 km", cost_eur: 9, duration_min: 40, checked: true },
+          { code: "SKG", name: "Selanik Makedonia", dist: "15 km", cost_eur: 4, duration_min: 25, checked: true },
+          { code: "HER", name: "Kandiye / Girit", dist: "5 km", cost_eur: 3, duration_min: 15, checked: true },
+          { code: "RHO", name: "Rodos Diagoras", dist: "15 km", cost_eur: 4, duration_min: 25, checked: true },
+          { code: "CHQ", name: "Hanya / Girit", dist: "140 km", cost_eur: 15, duration_min: 120, checked: false }
+        ]
+      },
+      {
+        id: "bae_dubai",
+        label: "🇦🇪 Birleşik Arap Emirlikleri (Dubai & Abu Dabi)",
+        airports: [
+          { code: "DXB", name: "Dubai Uluslararası", dist: "10 km", cost_eur: 3, duration_min: 15, checked: true },
+          { code: "SHJ", name: "Şarika", dist: "25 km", cost_eur: 6, duration_min: 30, checked: true },
+          { code: "DWC", name: "Dubai Al Maktoum", dist: "45 km", cost_eur: 10, duration_min: 40, checked: true },
+          { code: "AUH", name: "Abu Dabi Zayed", dist: "120 km", cost_eur: 18, duration_min: 75, checked: true }
         ]
       }
     ];
@@ -1366,6 +1678,22 @@
       return { winStart, winEnd, outStart, outEnd, inStart, inEnd, minStay };
     }
 
+    function onCurrencyChange() {
+      const curr = document.getElementById("currency").value;
+      const rateInput = document.getElementById("manualEurRate");
+      if (rateInput) {
+        if (curr === "EUR") {
+          rateInput.value = "1.0";
+        } else if (curr === "TRY") {
+          if (!rateInput.value || rateInput.value === "1.0") rateInput.value = "38.5";
+        } else if (curr === "USD") {
+          if (!rateInput.value || rateInput.value === "1.0") rateInput.value = "1.08";
+        }
+      }
+      applyManualRateToTransfers();
+      recombine();
+    }
+
     function initDates() {
       const now = new Date();
       const start = new Date(now);
@@ -1375,6 +1703,12 @@
 
       document.getElementById("windowStart").value = formatDateInput(start);
       document.getElementById("windowEnd").value = formatDateInput(end);
+
+      const rateInput = document.getElementById("manualEurRate");
+      if (rateInput && !rateInput.value) {
+        const curr = document.getElementById("currency") ? document.getElementById("currency").value : "TRY";
+        rateInput.value = curr === "EUR" ? "1.0" : (curr === "USD" ? "1.08" : "38.5");
+      }
 
       initCityDropdown();
       fetchCachedQueries();
@@ -1431,7 +1765,7 @@
 
       if (targets.length === 0) {
         document.getElementById("querySummary").innerHTML =
-          `<b style="color:#fca5a5">Uyarı:</b> Lütfen listeden en az 1 (en fazla 3) hedef havalimanı işaretleyin.`;
+          `<b style="color:#fca5a5">Uyarı:</b> Lütfen listeden en az 1 (en fazla ${MAX_TARGET_AIRPORTS}) hedef havalimanı işaretleyin.`;
         return;
       }
 
@@ -1521,6 +1855,40 @@
       recombine();
     }
 
+    function syncWeekendToggle(source) {
+      const cb = document.getElementById("includeWeekend");
+      const isChecked = cb ? cb.checked : false;
+      updateWeekendButtons(isChecked);
+    }
+
+    function toggleQuickWeekend() {
+      const cb = document.getElementById("includeWeekend");
+      if (cb) {
+        cb.checked = !cb.checked;
+        updateWeekendButtons(cb.checked);
+      }
+      recombine();
+    }
+
+    function updateWeekendButtons(isActive) {
+      ["quickWeekendBtn", "sidebarWeekendBtn"].forEach(id => {
+        const btn = document.getElementById(id);
+        if (btn) {
+          if (isActive) {
+            btn.style.background = "rgba(37, 99, 235, 0.25)";
+            btn.style.color = "#93c5fd";
+            btn.style.borderColor = "#3b82f6";
+            btn.innerHTML = "<span>✅ 🏖️ Tatile Haftasonu Dahil</span>";
+          } else {
+            btn.style.background = "var(--panel)";
+            btn.style.color = "#cbd5e1";
+            btn.style.borderColor = "var(--border)";
+            btn.innerHTML = "<span>🏖️ Tatile Haftasonunu Dahil Et</span>";
+          }
+        }
+      });
+    }
+
     function syncStayInputs(source) {
       const sMin = document.getElementById("minStay");
       const sMax = document.getElementById("maxStay");
@@ -1543,6 +1911,9 @@
 
     function getAirportNameByCode(code) {
       const upper = String(code || "").toUpperCase();
+      if (typeof KNOWN_AIRPORT_NAMES !== "undefined" && KNOWN_AIRPORT_NAMES[upper]) {
+        return KNOWN_AIRPORT_NAMES[upper];
+      }
       const fromCurrent = currentAirportsState.find(a => a.code === upper);
       if (fromCurrent && fromCurrent.name) return fromCurrent.name;
       for (const c of CITY_PRESETS) {
@@ -1664,6 +2035,26 @@
         }
       });
 
+      const out_manual_cabin_el = document.getElementById("outManualCabinFee");
+      const out_manual_checked_el = document.getElementById("outManualCheckedFee");
+      const in_manual_cabin_el = document.getElementById("inManualCabinFee");
+      const in_manual_checked_el = document.getElementById("inManualCheckedFee");
+      const manual_eur_rate_el = document.getElementById("manualEurRate");
+
+      const out_cabin_req = document.getElementById("outCabinReq") ? document.getElementById("outCabinReq").value : "none";
+      const out_checked_req = parseInt(document.getElementById("outCheckedReq") ? document.getElementById("outCheckedReq").value : "0", 10);
+      const out_baggage_included_only = document.getElementById("outBaggageIncludedOnly") ? document.getElementById("outBaggageIncludedOnly").checked : false;
+
+      const in_cabin_req = document.getElementById("inCabinReq") ? document.getElementById("inCabinReq").value : "none";
+      const in_checked_req = parseInt(document.getElementById("inCheckedReq") ? document.getElementById("inCheckedReq").value : "0", 10);
+      const in_baggage_included_only = document.getElementById("inBaggageIncludedOnly") ? document.getElementById("inBaggageIncludedOnly").checked : false;
+
+      const out_manual_cabin_fee = out_manual_cabin_el && out_manual_cabin_el.value.trim() !== "" ? parseFloat(out_manual_cabin_el.value) : null;
+      const out_manual_checked_fee = out_manual_checked_el && out_manual_checked_el.value.trim() !== "" ? parseFloat(out_manual_checked_el.value) : null;
+      const in_manual_cabin_fee = in_manual_cabin_el && in_manual_cabin_el.value.trim() !== "" ? parseFloat(in_manual_cabin_el.value) : null;
+      const in_manual_checked_fee = in_manual_checked_el && in_manual_checked_el.value.trim() !== "" ? parseFloat(in_manual_checked_el.value) : null;
+      const manual_eur_rate = manual_eur_rate_el && manual_eur_rate_el.value.trim() !== "" ? parseFloat(manual_eur_rate_el.value) : null;
+
       return {
         client_request_id: reqId,
         home_airport: document.getElementById("homeAirport").value.trim().toUpperCase(),
@@ -1686,14 +2077,26 @@
         out_dep_max_time: document.getElementById("outDepMax").value || "23:59",
         in_dep_min_time: document.getElementById("inDepMin").value || "00:00",
         in_dep_max_time: document.getElementById("inDepMax").value || "23:59",
-        baggage_mode: document.getElementById("baggageMode").value || "none",
-        cabin_bag_fee: parseFloat(document.getElementById("cabinBagFee").value || "0"),
-        checked_bag_fee: parseFloat(document.getElementById("checkedBagFee").value || "0"),
+        baggage_mode: (out_baggage_included_only && in_baggage_included_only && out_cabin_req === "1x8kg" && in_cabin_req === "1x8kg") ? "free_cabin_only" : "none",
+        cabin_bag_fee: 0,
+        checked_bag_fee: 0,
+        out_cabin_req,
+        out_checked_req,
+        out_baggage_included_only,
+        out_manual_cabin_fee,
+        out_manual_checked_fee,
+        in_cabin_req,
+        in_checked_req,
+        in_baggage_included_only,
+        in_manual_cabin_fee,
+        in_manual_checked_fee,
+        manual_eur_rate,
         out_excluded_airlines: Array.from(outExcludedAirlinesSet),
         in_excluded_airlines: Array.from(inExcludedAirlinesSet),
         out_excluded_airports: Array.from(outExcludedAirportsSet),
         in_excluded_airports: Array.from(inExcludedAirportsSet),
         only_asymmetric: document.getElementById("onlyAsymmetric").checked,
+        include_weekend: document.getElementById("includeWeekend") ? document.getElementById("includeWeekend").checked : false,
         include_transfer: document.getElementById("includeTransfer").checked,
         transfer_costs,
         transfer_durations
@@ -1703,15 +2106,21 @@
     async function stopActiveScrape() {
       const stopBtn = document.getElementById("stopScrapeBtn");
       stopBtn.disabled = true;
+      stopBtn.textContent = "⏳ Durduruluyor...";
       try {
         const res = await fetch("/api/scrape/stop", { method: "POST" });
         if (!res.ok) {
           showAlert("Durdurma isteği gönderilemedi.", "warn");
+        } else {
+          switchTab('cards');
         }
       } catch (e) {
         showAlert("Durdurma isteği hatası: " + e, "error");
       } finally {
-        stopBtn.disabled = false;
+        setTimeout(() => {
+          stopBtn.disabled = false;
+          stopBtn.textContent = "⏹️ Durdur";
+        }, 1200);
       }
     }
 
@@ -1766,7 +2175,7 @@
             showAlert(st.cache_error, "error");
           }
 
-          if (st.done > lastDone && st.done % 2 === 0) {
+          if (st.done > lastDone && st.done % 4 === 0) {
             lastDone = st.done;
             await recombine();
           }
@@ -1793,6 +2202,7 @@
         }
         await fetchCachedQueries();
         await recombine();
+        switchTab('cards');
       } finally {
         isWatchingProgress = false;
         btn.disabled = false;
@@ -1818,6 +2228,7 @@
       const pBox = document.getElementById("progressBox");
       btn.disabled = true;
       btn.textContent = "⏳ Başlatılıyor...";
+      switchTab('cards');
 
       try {
         const startRes = await fetch("/api/scrape", {
@@ -2023,6 +2434,10 @@
       document.getElementById("mOutCount").textContent = data.outbound_count || 0;
       document.getElementById("mInCount").textContent = data.inbound_count || 0;
       document.getElementById("mComboCount").textContent = data.combinations_count || 0;
+      const seeBtn = document.getElementById("seeResultsBtn");
+      if (seeBtn) {
+        seeBtn.textContent = `✅ Sonuçları Gör (${data.combinations_count || 0} Seçenek)`;
+      }
 
       if (data.query_summary && Array.isArray(data.query_summary.incomplete_scope_notes) && data.query_summary.incomplete_scope_notes.length > 0) {
         const sampleRoutes = data.query_summary.incomplete_scope_notes.slice(0, 4).join(", ");
@@ -2059,14 +2474,27 @@
             ? `<span class="badge asym">🔀 Asimetrik Rota</span>`
             : `<span class="badge sym">🔁 Simetrik Rota</span>`;
 
-          const breakdownParts = [`2 Bağımsız Tek Yön Uçuş: ${fmtMoney(c.flight_total_price, curr)}`];
-          if (c.baggage_total_price > 0) {
-            breakdownParts.push(`Tahmini Bagaj (Manuel): +${fmtMoney(c.baggage_total_price, curr)}`);
+          const weekendBadge = c.includes_weekend
+            ? `<span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3);">🏖️ Cmt &amp; Paz Dahil</span>`
+            : (c.weekend_days_count > 0
+                ? `<span class="badge" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3);">🗓️ ${c.weekend_label}</span>`
+                : `<span class="badge" style="background: rgba(148, 163, 184, 0.12); color: #94a3b8; border: 1px solid rgba(148, 163, 184, 0.25);">🗓️ Hafta İçi</span>`);
+
+          const baggageKnownBadge = !c.baggage_cost_known
+            ? `<span class="badge" style="background: rgba(245, 158, 11, 0.18); color: #f59e0b; border: 1px solid rgba(245, 158, 11, 0.35);">⚠️ Bagaj Ücreti Belirsiz</span>`
+            : "";
+
+          const breakdownParts = [`2 Bağımsız Uçuş: ${fmtMoney(c.flight_total_price, curr)}`];
+          if (c.baggage_cost_known && c.baggage_total_price > 0) {
+            breakdownParts.push(`Tahmini Bagaj: +${fmtMoney(c.baggage_total_price, curr)}`);
           }
           if (c.transfer_total_price > 0) {
             breakdownParts.push(`Tahmini Transfer: +${fmtMoney(c.transfer_total_price, curr)}`);
           }
-          const trSub = `<div class="sub">${breakdownParts.join(" · ")}</div>`;
+          let trSub = `<div class="sub">${breakdownParts.join(" · ")}</div>`;
+          if (!c.baggage_cost_known) {
+            trSub = `<div class="sub" style="color: #f59e0b;">*Uçuş tabanı (${fmtMoney(c.flight_total_price, curr)}) gösterilmektedir; ek bagaj ücreti dahil değildir.</div>`;
+          }
 
           const outExtra = [];
           if (c.out_flight_number) outExtra.push(`Uçuş No: ${c.out_flight_number}`);
@@ -2083,10 +2511,14 @@
               <div class="combo-header">
                 <div class="combo-title">
                   <span>#${idx + 1} | ${c.route_summary} (${c.stay_days} Gece Hedefte Kalış · ⏱️ Toplam Süre: ${fmtDurationMinutes(c.total_travel_minutes)})</span>
-                  ${badge}
+                  <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
+                    ${badge}
+                    ${weekendBadge}
+                    ${baggageKnownBadge}
+                  </div>
                 </div>
                 <div class="combo-price">
-                  <div class="total">${fmtMoney(c.grand_total_price, curr)}</div>
+                  <div class="total">${fmtMoney(c.grand_total_price, curr)}${!c.baggage_cost_known ? '*' : ''}</div>
                   ${trSub}
                 </div>
               </div>
@@ -2094,13 +2526,15 @@
                 <div class="leg-box">
                   <div class="leg-top">
                     <span>🛫 Gidiş: ${c.out_origin} → ${c.out_destination}</span>
-                    <span>${fmtMoney(c.out_price, curr)}${c.out_baggage_cost > 0 ? ` (+${fmtMoney(c.out_baggage_cost, curr)} tahmini bagaj)` : ""}</span>
+                    <span>${fmtMoney(c.out_price, curr)}${c.out_baggage_cost > 0 ? ` (+${fmtMoney(c.out_baggage_cost, curr)} bagaj)` : (c.out_baggage_cost === null ? ` (bagaj belirsiz)` : "")}</span>
                   </div>
                   <div class="leg-meta">
                     📅 <b>Kalkış:</b> ${c.out_date} ${fmtArrivalDateBadge(c.out_date, c.out_arrival_date, c.out_arrival_day_offset)}<br>
                     🕒 <b>Saat:</b> ${fmtField(c.out_departure_time)} – ${fmtField(c.out_arrival_time)} (${fmtField(c.out_duration)})<br>
                     ✈️ <b>Havayolu:</b> ${fmtField(c.out_airline)} &nbsp;|&nbsp; 🔄 <b>Aktarma:</b> ${fmtField(c.out_stops_text)}<br>
-                    ${c.out_baggage_label || "❓ Bagaj: Bilinmiyor (Doğrulanmadı)"}
+                    ${c.out_baggage_label ? `<div style="font-size:0.75rem; color:#34d399; margin-bottom:2px;">${c.out_baggage_label}</div>` : ""}
+                    🧳 <b>Gidiş Bagajı:</b> ${c.out_baggage_desc || "Gerekmiyor"}<br>
+                    👜 <span style="font-size:0.74rem; color:#94a3b8;">${c.out_personal_bag_info || ""}</span>
                     ${outExtra.length > 0 ? `<br><span style="color:#93c5fd">${outExtra.join(" · ")}</span>` : ""}
                   </div>
                   <a class="leg-link" href="${c.out_booking_url}" target="_blank" rel="noopener">
@@ -2110,13 +2544,15 @@
                 <div class="leg-box">
                   <div class="leg-top">
                     <span>🛬 Dönüş: ${c.in_origin} → ${c.in_destination}</span>
-                    <span>${fmtMoney(c.in_price, curr)}${c.in_baggage_cost > 0 ? ` (+${fmtMoney(c.in_baggage_cost, curr)} tahmini bagaj)` : ""}</span>
+                    <span>${fmtMoney(c.in_price, curr)}${c.in_baggage_cost > 0 ? ` (+${fmtMoney(c.in_baggage_cost, curr)} bagaj)` : (c.in_baggage_cost === null ? ` (bagaj belirsiz)` : "")}</span>
                   </div>
                   <div class="leg-meta">
                     📅 <b>Kalkış:</b> ${c.in_date} ${fmtArrivalDateBadge(c.in_date, c.in_arrival_date, c.in_arrival_day_offset)}<br>
                     🕒 <b>Saat:</b> ${fmtField(c.in_departure_time)} – ${fmtField(c.in_arrival_time)} (${fmtField(c.in_duration)})<br>
                     ✈️ <b>Havayolu:</b> ${fmtField(c.in_airline)} &nbsp;|&nbsp; 🔄 <b>Aktarma:</b> ${fmtField(c.in_stops_text)}<br>
-                    ${c.in_baggage_label || "❓ Bagaj: Bilinmiyor (Doğrulanmadı)"}
+                    ${c.in_baggage_label ? `<div style="font-size:0.75rem; color:#34d399; margin-bottom:2px;">${c.in_baggage_label}</div>` : ""}
+                    🧳 <b>Dönüş Bagajı:</b> ${c.in_baggage_desc || "Gerekmiyor"}<br>
+                    👜 <span style="font-size:0.74rem; color:#94a3b8;">${c.in_personal_bag_info || ""}</span>
                     ${inExtra.length > 0 ? `<br><span style="color:#93c5fd">${inExtra.join(" · ")}</span>` : ""}
                   </div>
                   <a class="leg-link" href="${c.in_booking_url}" target="_blank" rel="noopener">
@@ -2148,9 +2584,11 @@
                 <th>#</th>
                 <th>Genel Toplam</th>
                 <th>Uçuş Toplamı</th>
-                <th>Tahmini Bagaj</th>
+                <th>Gidiş Bagajı</th>
+                <th>Dönüş Bagajı</th>
+                <th>Toplam Bagaj</th>
                 <th>Tahmini Transfer</th>
-                <th>Gece</th>
+                <th>Gece / Gün</th>
                 <th>Gidiş Kalkış/Varış</th>
                 <th>Gidiş Rota</th>
                 <th>G. Havayolu</th>
@@ -2170,11 +2608,13 @@
               ${combos.map((c, i) => `
                 <tr>
                   <td>${i + 1}</td>
-                  <td><b style="color: var(--accent)">${fmtMoney(c.grand_total_price, curr)}</b></td>
+                  <td><b style="color: var(--accent)">${fmtMoney(c.grand_total_price, curr)}${!c.baggage_cost_known ? ' ⚠️*' : ''}</b></td>
                   <td>${fmtMoney(c.flight_total_price, curr)}</td>
-                  <td>${fmtMoney(c.baggage_total_price, curr)}</td>
+                  <td><span style="font-size:0.75rem;">${c.out_baggage_desc || "-"}</span></td>
+                  <td><span style="font-size:0.75rem;">${c.in_baggage_desc || "-"}</span></td>
+                  <td>${c.baggage_cost_known ? (c.baggage_total_price > 0 ? fmtMoney(c.baggage_total_price, curr) : 'Dahil / Yok') : '<span style="color:#f59e0b;">Belirsiz</span>'}</td>
                   <td>${fmtMoney(c.transfer_total_price, curr)}</td>
-                  <td>${c.stay_days} gece</td>
+                  <td>${c.stay_days} gece<br><span style="font-size:0.72rem; color:${c.includes_weekend ? '#34d399' : (c.weekend_days_count > 0 ? '#fbbf24' : '#94a3b8')}; font-weight:600;">${c.includes_weekend ? '🏖️ Cmt &amp; Paz' : (c.weekend_days_count > 0 ? '🗓️ ' + c.weekend_label : '🗓️ Hafta İçi')}</span></td>
                   <td>${c.out_date} → ${c.out_arrival_date || "?"}</td>
                   <td><b>${c.out_origin}→${c.out_destination}</b></td>
                   <td>${fmtField(c.out_airline)}</td>
@@ -2272,8 +2712,24 @@
       document.getElementById("outDepMax").value = "23:59";
       document.getElementById("inDepMin").value = "00:00";
       document.getElementById("inDepMax").value = "23:59";
-      document.getElementById("baggageMode").value = "none";
+      if (document.getElementById("outCabinReq")) document.getElementById("outCabinReq").value = "none";
+      if (document.getElementById("outCheckedReq")) document.getElementById("outCheckedReq").value = "0";
+      if (document.getElementById("outBaggageIncludedOnly")) document.getElementById("outBaggageIncludedOnly").checked = false;
+      if (document.getElementById("outManualCabinFee")) document.getElementById("outManualCabinFee").value = "";
+      if (document.getElementById("outManualCheckedFee")) document.getElementById("outManualCheckedFee").value = "";
+      if (document.getElementById("inCabinReq")) document.getElementById("inCabinReq").value = "none";
+      if (document.getElementById("inCheckedReq")) document.getElementById("inCheckedReq").value = "0";
+      if (document.getElementById("inBaggageIncludedOnly")) document.getElementById("inBaggageIncludedOnly").checked = false;
+      if (document.getElementById("inManualCabinFee")) document.getElementById("inManualCabinFee").value = "";
+      if (document.getElementById("inManualCheckedFee")) document.getElementById("inManualCheckedFee").value = "";
+      if (document.getElementById("manualEurRate")) {
+        const curr = document.getElementById("currency") ? document.getElementById("currency").value : "TRY";
+        document.getElementById("manualEurRate").value = curr === "EUR" ? "1.0" : (curr === "USD" ? "1.08" : "38.5");
+      }
+      if (document.getElementById("baggageMode")) document.getElementById("baggageMode").value = "none";
       document.getElementById("onlyAsymmetric").checked = false;
+      if (document.getElementById("includeWeekend")) document.getElementById("includeWeekend").checked = false;
+      updateWeekendButtons(false);
       document.getElementById("includeTransfer").checked = false;
       toggleBaggageFeeInputs();
       toggleTransferBox();
@@ -2305,9 +2761,9 @@
       }
       const rows = lastResponse.combinations;
       const headers = [
-        "grand_total_price", "flight_total_price", "baggage_total_price", "transfer_total_price", "stay_days",
-        "out_date", "out_arrival_date", "out_origin", "out_destination", "out_airline", "out_departure_time", "out_arrival_time", "out_duration", "out_stops_text", "out_price",
-        "in_date", "in_arrival_date", "in_origin", "in_destination", "in_airline", "in_departure_time", "in_arrival_time", "in_duration", "in_stops_text", "in_price",
+        "grand_total_price", "flight_total_price", "baggage_total_price", "baggage_cost_known", "transfer_total_price", "stay_days",
+        "out_date", "out_arrival_date", "out_origin", "out_destination", "out_airline", "out_departure_time", "out_arrival_time", "out_duration", "out_stops_text", "out_price", "out_baggage_cost", "out_baggage_desc", "out_personal_bag_info",
+        "in_date", "in_arrival_date", "in_origin", "in_destination", "in_airline", "in_departure_time", "in_arrival_time", "in_duration", "in_stops_text", "in_price", "in_baggage_cost", "in_baggage_desc", "in_personal_bag_info",
         "out_booking_url", "in_booking_url"
       ];
       const csvContent = "\uFEFF" + [

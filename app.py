@@ -19,7 +19,7 @@ st.set_page_config(
 st.title("✈️ Smart Flight Finder (Kişisel Akıllı Uçuş Bulucu)")
 st.caption(
     "Ayrık Tek Yön (Decoupled One-Way) tarama ve kartezyen çarpım ile "
-    "yakın alternatif havalimanları (en fazla 3 hedef) arasındaki en ucuz simetrik/asimetrik gidiş-dönüş kombinasyonlarını bulur. "
+    "yakın alternatif havalimanları (en fazla 4 hedef) arasındaki en ucuz simetrik/asimetrik gidiş-dönüş kombinasyonlarını bulur. "
     "Sonuçlar iki bağımsız tek yön teklifin toplamıdır."
 )
 
@@ -44,9 +44,9 @@ with st.sidebar:
     ).upper().strip()
 
     target_airports_raw = st.text_input(
-        "Hedef Yakın Havalimanları (Virgülle, en fazla 3)",
-        value="AMS, DUS, CGN",
-        help="En fazla 3 benzersiz hedef havalimanı seçebilirsiniz (kalkış havalimanı hariç).",
+        "Hedef Yakın Havalimanları (Virgülle, en fazla 4)",
+        value="AMS, DUS, CGN, EIN",
+        help="En fazla 4 benzersiz hedef havalimanı seçebilirsiniz (kalkış havalimanı hariç).",
     )
     raw_targets = [
         code.strip().upper()
@@ -58,9 +58,9 @@ with st.sidebar:
         if code != home_airport and code not in target_airports:
             target_airports.append(code)
 
-    if len(target_airports) > 3:
-        st.warning("En fazla 3 hedef havalimanı seçilebilir. İlk 3 havalimanı kullanılacak.")
-        target_airports = target_airports[:3]
+    if len(target_airports) > 4:
+        st.warning("En fazla 4 hedef havalimanı seçilebilir. İlk 4 havalimanı kullanılacak.")
+        target_airports = target_airports[:4]
 
     st.subheader("📅 Seyahat Tarih Aralığı")
     default_win_start = date.today() + timedelta(days=10)
@@ -126,6 +126,10 @@ with st.sidebar:
 
     only_asymmetric = st.checkbox(
         "Sadece asimetrik rotaları göster (Farklı havalimanından dönüş)",
+        value=False,
+    )
+    include_weekend = st.checkbox(
+        "🏖️ Tatile haftasonunu dahil et (Cumartesi / Pazar)",
         value=False,
     )
 
@@ -205,7 +209,7 @@ current_search_sig = (
 # ---------------- TARAMA İŞLEMİ ----------------
 if scrape_btn:
     if not home_airport or not target_airports:
-        st.error("Lütfen kalkış ve en az 1 (en fazla 3) varış havalimanı kodu girin.")
+        st.error("Lütfen kalkış ve en az 1 (en fazla 4) varış havalimanı kodu girin.")
     elif out_end < out_start or in_end < in_start:
         st.error("Seçilen tarih aralığı minimum kalış süresi için yetersiz.")
     else:
@@ -267,6 +271,7 @@ else:
         window_end=win_end_str,
         expected_currency=active_curr,
         max_stops=max_stops,
+        include_weekend=include_weekend,
         include_transfer=include_transfer,
         transfer_costs=transfer_costs,
         transfer_durations=transfer_durations,
