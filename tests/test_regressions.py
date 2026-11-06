@@ -8,6 +8,7 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 import scraper
+import pandas as pd
 from scraper import (
     FlightOption,
     RouteQueryResult,
@@ -1851,20 +1852,27 @@ class SmartFlightFinderRegressionTests(unittest.TestCase):
         self.assertEqual(res_sun.checked_cost, 0.0)
         self.assertEqual(res_sun.leg_baggage_cost, 0.0)
         self.assertTrue(res_sun.leg_cost_known)
-        self.assertIn("SunExpress SunValue varsayımı", res_sun.checked_desc)
+        self.assertIn("SunValue varsayımı", res_sun.checked_desc)
 
-        # 30 kg için SunEco+ (+€15)
-        res_sun_30 = evaluate_leg_baggage(
+        # 30 kg için teklifte üst paket farkı yoksa sabit €15 üretilmez (belirsiz kalır); manuel ücret varsa uygulanır
+        res_sun_30_unknown = evaluate_leg_baggage(
             flight_data=sun_in,
             cabin_req="none",
             checked_req=30,
             currency="EUR",
         )
-        self.assertEqual(res_sun_30.cabin_cost, 0.0)
-        self.assertEqual(res_sun_30.checked_cost, 15.0)
-        self.assertEqual(res_sun_30.leg_baggage_cost, 15.0)
-        self.assertTrue(res_sun_30.leg_cost_known)
-        self.assertIn("SunEco+", res_sun_30.checked_desc)
+        self.assertIsNone(res_sun_30_unknown.checked_cost)
+        self.assertFalse(res_sun_30_unknown.leg_cost_known)
+
+        res_sun_30_manual = evaluate_leg_baggage(
+            flight_data=sun_in,
+            cabin_req="none",
+            checked_req=30,
+            currency="EUR",
+            manual_checked_fee=15.0,
+        )
+        self.assertEqual(res_sun_30_manual.checked_cost, 15.0)
+        self.assertEqual(res_sun_30_manual.leg_baggage_cost, 15.0)
 
         # 3) Kombinasyon oluşturma ve toplam bagaj hesabı
         f_ajet_out = FlightOption(
@@ -2067,6 +2075,145 @@ class SmartFlightFinderRegressionTests(unittest.TestCase):
         # Yalnızca THY (teklifte onaylı 8kg kabin ve 20kg bagajı olan) geçer
         self.assertEqual(len(df_filtered_inc), 1)
         self.assertEqual(df_filtered_inc.iloc[0]["out_airline"], "Turkish Airlines")
+
+    # 19. Bagaj hakkı öncelikleri, SunValue/SunLight kuralları, AJet tarifesi ve eksik toplam güvenliği
+    def test_19_baggage_strict_rules_and_subtotals(self):
+        from baggage_rules import evaluate_leg_baggage
+        from combiner import build_combinations_dataframe
+
+        # 1. SunValue ve 8 kg kabin + 20 kg uçak altı -> ek ücret 0
+        sun_val = {
+            "origin": "ESB", "destination": "AMS", "airline": "SunExpress",
+            "package_name": "SunValue", "stops": 0, "currency": "TRY",
+        }
+        res_val = evaluate_leg_baggage(sun_val, cabin_req="1x8kg", checked_req=20, currency="TRY")
+        self.assertEqual(res_val.cabin_cost, 0.0)
+        self.assertEqual(res_val.checked_cost, 0.0)
+        self.assertEqual(res_val.leg_baggage_cost, 0.0)
+        self.assertTrue(res_val.leg_cost_known)
+        self.assertEqual(res_val.cabin_source, "package_rule")
+        self.assertEqual(res_val.checked_source, "package_rule")
+        self.assertTrue(res_val.passes_filter)
+
+        # 2. SunExpress paketi bilinmiyor -> SunValue tahmini etiketlenir, doğrulanmış hak filtresinden geçmez
+        sun_unknown_pkg = {
+            "origin": "ESB", "destination": "AMS", "airline": "SunExpress",
+            "package_name": None, "stops": 0, "currency": "TRY",
+        }
+        res_un_pkg = evaluate_leg_baggage(sun_unknown_pkg, cabin_req="1x8kg", checked_req=20, currency="TRY", baggage_included_only=True)
+        self.assertEqual(res_un_pkg.cabin_cost, 0.0)
+        self.assertEqual(res_un_pkg.checked_cost, 0.0)
+        self.assertEqual(res_un_pkg.cabin_source, "sunvalue_assumption")
+        self.assertEqual(res_un_pkg.checked_source, "sunvalue_assumption")
+        self.assertIn("SunValue varsayımı", res_un_pkg.leg_summary_text)
+        self.assertFalse(res_un_pkg.passes_filter)
+
+        # 3. SunExpress'te açık 'kabin dahil değil' ve '0 kg' -> SunValue bunları ezmez
+        sun_neg = {
+            "origin": "ESB", "destination": "AMS", "airline": "SunExpress",
+            "stops": 0, "currency": "TRY",
+            "cabin_baggage_included": False,
+            "checked_baggage_included": False,
+            "checked_baggage_kg": 0,
+        }
+        res_neg = evaluate_leg_baggage(sun_neg, cabin_req="1x8kg", checked_req=20, currency="TRY")
+        self.assertFalse(res_neg.cabin_cost == 0.0)
+        self.assertFalse(res_neg.checked_cost == 0.0)
+        self.assertFalse(res_neg.passes_filter)
+
+        # 4. Uygun SunLight rotasında 8 kg kabin + 20 kg uçak altı -> referans başlangıç tahmini €54,98
+        sunlight_flight = {
+            "origin": "ESB", "destination": "DUS", "airline": "SunExpress",
+            "package_name": "SunLight", "stops": 0, "currency": "EUR",
+        }
+        res_sl = evaluate_leg_baggage(sunlight_flight, cabin_req="1x8kg", checked_req=20, currency="EUR")
+        self.assertEqual(res_sl.cabin_cost, 19.99)
+        self.assertEqual(res_sl.checked_cost, 34.99)
+        self.assertEqual(res_sl.leg_baggage_cost, 54.98)
+        self.assertTrue(res_sl.leg_cost_known)
+        self.assertIn("SunLight başlangıç fiyatı", res_sl.cabin_desc)
+        self.assertIn("SunLight başlangıç fiyatı", res_sl.checked_desc)
+
+        # 5. Uçak altı dahil işareti var ama kilo yok -> 20 kg doğrulanmış sayılmaz
+        bag_no_kg = {
+            "origin": "ESB", "destination": "DUS", "airline": "AJet",
+            "stops": 0, "currency": "EUR",
+            "checked_baggage_included": True, "checked_baggage_kg": None,
+        }
+        res_no_kg = evaluate_leg_baggage(bag_no_kg, cabin_req="none", checked_req=20, currency="EUR", baggage_included_only=True)
+        self.assertFalse(res_no_kg.checked_passes_filter)
+        self.assertIsNone(res_no_kg.checked_cost)
+        self.assertIn("Uçak altı dahil · kilo doğrulanmadı", res_no_kg.checked_desc)
+
+        # 6. AJet 20 kg dahil / 25 kg ihtiyaç -> ilk bagaj tarifesinden €12 uygulanmaz
+        ajet_20kg = {
+            "origin": "ESB", "destination": "DUS", "airline": "AJet",
+            "stops": 0, "currency": "EUR",
+            "checked_baggage_included": True, "checked_baggage_kg": 20,
+        }
+        res_ajet_25 = evaluate_leg_baggage(ajet_20kg, cabin_req="none", checked_req=25, currency="EUR")
+        self.assertIsNone(res_ajet_25.checked_cost)
+        self.assertFalse(res_ajet_25.leg_cost_known)
+
+        # 7. AJet 0 kg dahil / 30 kg ihtiyaç -> €25'lik 20 kg paketi yeterli sayılmaz
+        ajet_0kg = {
+            "origin": "ESB", "destination": "DUS", "airline": "AJet",
+            "stops": 0, "currency": "EUR",
+            "checked_baggage_included": False, "checked_baggage_kg": 0,
+        }
+        res_ajet_30 = evaluate_leg_baggage(ajet_0kg, cabin_req="none", checked_req=30, currency="EUR")
+        self.assertIsNone(res_ajet_30.checked_cost)
+        self.assertFalse(res_ajet_30.leg_cost_known)
+
+        # 8. Bilet €200, bilinen bagaj €40, diğer bagaj belirsiz -> ara toplam €240, tam toplam null
+        f_out = FlightOption(
+            origin="ESB", destination="DUS", date="2026-11-15", airline="AJet",
+            departure_time="10:00", arrival_time="13:00", duration="3 sa", duration_minutes=180,
+            stops=0, stops_text="Aktarmasız", price=100.0, currency="EUR",
+            booking_url="https://example.com/out", arrival_day_offset=0, arrival_date="2026-11-15",
+        )
+        f_in_unknown = FlightOption(
+            origin="DUS", destination="ESB", date="2026-11-20", airline="Pegasus",
+            departure_time="14:00", arrival_time="19:00", duration="4 sa", duration_minutes=240,
+            stops=0, stops_text="Aktarmasız", price=100.0, currency="EUR",
+            booking_url="https://example.com/in", arrival_day_offset=0, arrival_date="2026-11-20",
+        )
+        df_part = build_combinations_dataframe(
+            outbound_flights=[f_out],
+            inbound_flights=[f_in_unknown],
+            min_stay_days=5, max_stay_days=5, expected_currency="EUR",
+            out_cabin_req="1x8kg", out_checked_req=20,  # AJet: 15 + 25 = 40 (known)
+            in_cabin_req="1x8kg", in_checked_req=20,    # Pegasus: unknown
+        )
+        self.assertEqual(len(df_part), 1)
+        r_part = df_part.iloc[0]
+        self.assertEqual(r_part["flight_total_price"], 200.0)
+        self.assertEqual(r_part["known_subtotal_price"], 240.0)
+        self.assertTrue(pd.isna(r_part["grand_total_price"]))
+        self.assertFalse(r_part["baggage_cost_known"])
+        self.assertEqual(r_part["missing_baggage_note"], "dönüş bagajı hariç")
+
+        # JSON çıktısında grand_total_price'ın null olduğunu doğrula
+        from combiner import sanitize_records_for_json
+        records = sanitize_records_for_json(df_part.to_dict(orient="records"))
+        self.assertIsNone(records[0]["grand_total_price"])
+
+        # 9. Türkiye dışı rota veya aktarma bilgisi belirsiz -> kapsamı doğrulanmamış referans ücret otomatik uygulanmaz
+        ajet_non_tr = {
+            "origin": "DUS", "destination": "AMS", "airline": "AJet",
+            "stops": 0, "currency": "EUR",
+        }
+        res_non_tr = evaluate_leg_baggage(ajet_non_tr, cabin_req="1x8kg", checked_req=20, currency="EUR")
+        self.assertIsNone(res_non_tr.cabin_cost)
+        self.assertIsNone(res_non_tr.checked_cost)
+
+        ajet_unknown_stops = {
+            "origin": "ESB", "destination": "DUS", "airline": "AJet",
+            "stops": None, "currency": "EUR",
+        }
+        res_un_stops = evaluate_leg_baggage(ajet_unknown_stops, cabin_req="1x8kg", checked_req=20, currency="EUR")
+        self.assertIsNone(res_un_stops.cabin_cost)
+        self.assertIsNone(res_un_stops.checked_cost)
 
 
 if __name__ == "__main__":

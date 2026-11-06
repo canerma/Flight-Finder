@@ -56,6 +56,7 @@ class FlightOption:
     layover_airports: Optional[List[str]] = None
     self_transfer: Optional[bool] = None
     segments: Optional[List[str]] = None
+    package_name: Optional[str] = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -94,6 +95,7 @@ class FlightOption:
             layover_airports=data.get("layover_airports") or None,
             self_transfer=data.get("self_transfer", None),
             segments=data.get("segments") or None,
+            package_name=data.get("package_name") or None,
         )
 
 
@@ -493,6 +495,97 @@ def extract_verified_baggage_flag(card_text: Optional[str], aria_label: Optional
     return None
 
 
+def extract_verified_checked_baggage(
+    card_text: Optional[str], aria_label: Optional[str]
+) -> Tuple[Optional[bool], Optional[int]]:
+    """
+    Kart metninden veya aria-label'dan açıkça doğrulanmış kayıtlı uçak altı bagajı hakkını ve kilosunu çıkarır.
+    Kural: Kilo doğrulanmamışsa asla 20 kg veya sabit bir kilo uydurmaz; (True, None) döner.
+    Olumsuz ifadelerde (False, 0) döner.
+    Bilgi yoksa (None, None) döner.
+    """
+    blob = re.sub(r"\s+", " ", f"{card_text or ''} {aria_label or ''}".lower()).strip()
+    if not blob:
+        return None, None
+
+    # Olumsuz kontrolü (0 kg, dahil değil, yok, hariç)
+    neg_pats = [
+        r"\b(?:0\s*kg\s+(?:kayıtlı\s+bagaj|uçak\s+altı\s+bagaj|bagaj)|uçak\s+altı\s+bagaj[ıi]?\s+(?:dahil\s+değil|yok|hariç|ücretli)|kayıtlı\s+bagaj\s+(?:dahil\s+değil|yok|hariç|ücretli)|no\s+checked\s+bag(?:gage)?)\b",
+        r"\bchecked\s+bag(?:gage)?\s+(?:not\s+included|excluded|for\s+a\s+fee|0\s*kg)\b",
+    ]
+    for pat in neg_pats:
+        if re.search(pat, blob, flags=re.IGNORECASE):
+            return False, 0
+
+    # Kilolu olumlu kontrolü (örn. "20 kg kayıtlı bagaj", "15 kg bagaj dahil", "checked bag: 23 kg")
+    kg_m = re.search(r"\b(\d{1,2})\s*kg\s+(?:kayıtlı\s+bagaj|uçak\s+altı\s+bagaj|bagaj|checked\s+bag(?:gage)?)\b", blob, flags=re.IGNORECASE)
+    if kg_m:
+        try:
+            return True, int(kg_m.group(1))
+        except (ValueError, TypeError):
+            pass
+
+    kg_m2 = re.search(r"\b(?:kayıtlı\s+bagaj|uçak\s+altı\s+bagaj|bagaj|checked\s+bag(?:gage)?)\s*[:\-]?\s*(\d{1,2})\s*kg\b", blob, flags=re.IGNORECASE)
+    if kg_m2:
+        try:
+            return True, int(kg_m2.group(1))
+        except (ValueError, TypeError):
+            pass
+
+    # Kilosuz olumlu kontrolü (dahil ama kilo yazmıyor)
+    pos_pats = [
+        r"\b(?:kayıtlı\s+bagaj\s+dahil|uçak\s+altı\s+bagaj\s+dahil|ücretsiz\s+kayıtlı\s+bagaj|checked\s+bag(?:gage)?\s+included|free\s+checked\s+bag(?:gage)?)\b"
+    ]
+    for pat in pos_pats:
+        if re.search(pat, blob, flags=re.IGNORECASE):
+            return True, None
+
+    return None, None
+
+
+def extract_package_name(card_text: Optional[str], aria_label: Optional[str]) -> Optional[str]:
+    """
+    Kart metninden veya aria-label'dan açıkça okunan havayolu paket adını çıkarır.
+    Örn: SunValue, SunLight, SunEco+, SunComfort, EcoFly, ExtraFly, Basic, EcoJet, Light vb.
+    Uydurmaz; bulunamazsa None döner.
+    """
+    blob = f"{card_text or ''} {aria_label or ''}"
+    if not blob.strip():
+        return None
+
+    if re.search(r"\bsunvalue\b", blob, flags=re.IGNORECASE):
+        return "SunValue"
+    if re.search(r"\bsunlight\b", blob, flags=re.IGNORECASE):
+        return "SunLight"
+    if re.search(r"\bsuneco\+?\b", blob, flags=re.IGNORECASE):
+        return "SunEco+"
+    if re.search(r"\bsuncomfort\b", blob, flags=re.IGNORECASE):
+        return "SunComfort"
+
+    if re.search(r"\becofly\b", blob, flags=re.IGNORECASE):
+        return "EcoFly"
+    if re.search(r"\bextrafly\b", blob, flags=re.IGNORECASE):
+        return "ExtraFly"
+    if re.search(r"\bprimefly\b", blob, flags=re.IGNORECASE):
+        return "PrimeFly"
+
+    if re.search(r"\b(?:ajet\s+)?basic\b", blob, flags=re.IGNORECASE):
+        return "Basic"
+    if re.search(r"\becojet\b", blob, flags=re.IGNORECASE):
+        return "EcoJet"
+    if re.search(r"\bflexjet\b", blob, flags=re.IGNORECASE):
+        return "FlexJet"
+
+    if re.search(r"\b(?:pegasus\s+)?light\b", blob, flags=re.IGNORECASE):
+        return "Light"
+    if re.search(r"\bsüper\s+eko\b|\bsuper\s+eko\b", blob, flags=re.IGNORECASE):
+        return "Süper Eko"
+    if re.search(r"\bavantaj\b", blob, flags=re.IGNORECASE):
+        return "Avantaj"
+
+    return None
+
+
 def extract_extra_metadata(
     card_text: Optional[str],
     aria_label: Optional[str],
@@ -632,6 +725,8 @@ def parse_raw_card_dicts(
             stops_text = stops_raw if stops is not None else None
 
             cabin_bag = extract_verified_baggage_flag(card_text, aria_label)
+            checked_bag, checked_kg = extract_verified_checked_baggage(card_text, aria_label)
+            pkg_name = extract_package_name(card_text, aria_label)
             flight_num, layovers, self_tr, segments = extract_extra_metadata(
                 card_text, aria_label, orig_clean, dest_clean
             )
@@ -669,10 +764,13 @@ def parse_raw_card_dicts(
                     arrival_day_offset=day_offset,
                     arrival_date=arr_date,
                     cabin_baggage_included=cabin_bag,
+                    checked_baggage_included=checked_bag,
+                    checked_baggage_kg=checked_kg,
                     flight_number=flight_num,
                     layover_airports=layovers,
                     self_transfer=self_tr,
                     segments=segments,
+                    package_name=pkg_name,
                 )
             )
         except Exception:

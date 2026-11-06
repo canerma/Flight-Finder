@@ -12,9 +12,17 @@ Kişisel koltuk altı çantası üst dolap kabin valizi ihtiyacını karşılama
 """
 
 import math
+import re
 from dataclasses import dataclass
 from typing import Optional, Dict, Any, Tuple, Set
 
+
+TURKEY_AIRPORTS: Set[str] = {
+    "ESB", "IST", "SAW", "AYT", "ADB", "BJV", "DLM", "ADA", "GZT", "TZX",
+    "ASR", "KYA", "EZS", "ERZ", "VAN", "DIY", "SZF", "MLX", "GNY", "EDO",
+    "DNZ", "KZR", "USQ", "ONQ", "AOE", "TEQ", "MQM", "BAL", "CKZ", "NOP",
+    "NAV", "KCM", "IGD", "BGG", "AJI", "VAS", "YEI", "ISE", "OGU", "KFS"
+}
 
 UK_AIRPORTS: Set[str] = {
     "STN", "LTN", "LGW", "LHR", "SEN", "LCY", "BHX", "MAN", "EDI", "GLA",
@@ -38,7 +46,7 @@ class BaggageLegResult:
     cabin_required: bool
     cabin_cost: Optional[float]           # None if unknown, 0.0 if included/not needed, or fee
     cabin_status: str                     # included | verified_price | reference_estimate | manual_estimate | unknown | not_needed
-    cabin_source: str
+    cabin_source: str                     # verified_offer | package_rule | sunvalue_assumption | basic_entry | sunlight_starting | manual | unknown | not_needed
     cabin_desc: str
     cabin_ref_eur: Optional[float]
     cabin_passes_filter: bool
@@ -46,16 +54,18 @@ class BaggageLegResult:
     checked_required_kg: int
     checked_cost: Optional[float]         # None if unknown, 0.0 if included/not needed, or fee
     checked_status: str                   # included | verified_price | reference_estimate | manual_estimate | unknown | not_needed
-    checked_source: str
+    checked_source: str                   # verified_offer | package_rule | sunvalue_assumption | basic_entry | sunlight_starting | manual | unknown | not_needed
     checked_desc: str
     checked_ref_eur: Optional[float]
     checked_passes_filter: bool
 
     leg_baggage_cost: Optional[float]     # None if any required item is unknown, else cabin_cost + checked_cost
-    leg_cost_known: bool
+    leg_known_cost: float                 # Sum of all known required bag items on this leg (>= 0.0)
+    leg_cost_known: bool                  # True only if all required bag items have known cost
     leg_summary_text: str
     personal_bag_info: str
     passes_filter: bool
+    is_estimated: bool                    # True if based on assumption or reference estimate
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -72,10 +82,12 @@ class BaggageLegResult:
             "checked_desc": self.checked_desc,
             "checked_ref_eur": self.checked_ref_eur,
             "leg_baggage_cost": self.leg_baggage_cost,
+            "leg_known_cost": self.leg_known_cost,
             "leg_cost_known": self.leg_cost_known,
             "leg_summary_text": self.leg_summary_text,
             "personal_bag_info": self.personal_bag_info,
             "passes_filter": self.passes_filter,
+            "is_estimated": self.is_estimated,
         }
 
 
@@ -133,7 +145,7 @@ def convert_ref_eur_to_target(
 def evaluate_leg_baggage(
     flight_data: Dict[str, Any],
     cabin_req: str = "none",                      # "none" | "1x8kg"
-    checked_req: int = 0,                         # 0, 5, 10, 15, 20
+    checked_req: int = 0,                         # 0, 5, 10, 15, 20, 25, 30, 35
     baggage_included_only: bool = False,          # Yalnızca seçili ihtiyaçların tamamı teklife dahil olanları geçir
     manual_cabin_fee: Optional[float] = None,     # Kullanıcı manuel kabin ücreti (None = boş/belirsiz, 0.0 = ücretsiz)
     manual_checked_fee: Optional[float] = None,   # Kullanıcı manuel uçak altı ücreti
@@ -144,10 +156,10 @@ def evaluate_leg_baggage(
     """
     Tek bir bacak (gidiş veya dönüş) için bağımsız bagaj değerlendirmesi yapar.
     Öncelik sıraları:
-    1. Doğrulanmış teklif verisi
-    2. Kullanıcı manuel tahmini (varsa)
-    3. Rota ve pakete uygun resmi referans ücret
-    4. Belirsiz (unknown / None)
+    1. Teklifte açıkça okunan hak veya hak yokluğu (verified_offer).
+    2. Teklifin paket adı biliniyorsa rotaya uygun paket kuralı (package_rule).
+    3. Paket bilinmiyorsa açıkça etiketlenen varsayım (assumption).
+    4. Belirsiz (unknown / None).
     """
     airline_raw = str(flight_data.get("airline") or "")
     airline_norm = normalize_airline_name(airline_raw)
@@ -164,12 +176,12 @@ def evaluate_leg_baggage(
         return val
 
     stops = _clean(flight_data.get("stops"))
-    has_stops = False
+    is_direct = False
     if stops is not None:
         try:
-            has_stops = int(stops) > 0
+            is_direct = (int(stops) == 0)
         except (ValueError, TypeError):
-            has_stops = False
+            is_direct = False
 
     # Doğrulanmış teklif alanları (asla tahminle ezilmez)
     verified_cabin_raw = _clean(flight_data.get("cabin_baggage_included"))
@@ -186,11 +198,21 @@ def evaluate_leg_baggage(
         except (ValueError, TypeError):
             verified_checked_kg = None
 
+    pkg_raw = str(flight_data.get("package_name") or "").lower().strip()
+    is_sunvalue = "sunvalue" in pkg_raw
+    is_sunlight = "sunlight" in pkg_raw
+    is_ecofly = "ecofly" in pkg_raw
+
     personal_info = get_personal_bag_info(airline_norm)
+    is_tr_origin = origin in TURKEY_AIRPORTS
+    is_tr_dest = destination in TURKEY_AIRPORTS
+    is_turkey_route = (is_tr_origin != is_tr_dest)
     is_uk_route = (origin in UK_AIRPORTS) or (destination in UK_AIRPORTS)
-    is_standard_ajet_europe = (
-        (origin in STANDARD_AJET_EUROPE_AIRPORTS) or (destination in STANDARD_AJET_EUROPE_AIRPORTS)
-    )
+    is_de_nl_route = (origin in STANDARD_AJET_EUROPE_AIRPORTS) or (destination in STANDARD_AJET_EUROPE_AIRPORTS)
+
+    # Rota ve aktarma kapsam kontrolleri (aktarma sayısı bilinmiyorsa direkt uçuş varsayılmaz!)
+    is_ajet_de_nl_scope = is_turkey_route and is_de_nl_route and is_direct
+    is_sunlight_scope = is_turkey_route and not is_uk_route and is_direct
 
     # -------------------------------------------------------------
     # 1. ÜST DOLAP KABİN VALİZİ DEĞERLENDİRMESİ
@@ -202,48 +224,113 @@ def evaluate_leg_baggage(
     cabin_desc = "Kabin valizi gerekmiyor"
     cabin_ref_eur: Optional[float] = None
     cabin_passes_filter = True
+    cabin_is_estimated = False
 
     if cabin_required:
-        # A) Teklif üzerinden doğrulandı mı?
+        # 1. Teklifte açıkça okunan hak veya hak yokluğu
         if verified_cabin is True:
             cabin_cost = 0.0
             cabin_status = "included"
             cabin_source = "verified_offer"
             cabin_desc = "8 kg kabin: dahil · teklif üzerinden doğrulandı"
             cabin_passes_filter = True
+            cabin_is_estimated = False
+        elif verified_cabin is False:
+            # Teklifte kabin dahil olmadığı açıkça belirtilmiş -> paket varsayımı bunu EZEMEZ!
+            cabin_passes_filter = False
+            if manual_cabin_fee is not None:
+                cabin_cost = round(float(manual_cabin_fee), 2)
+                cabin_status = "manual_estimate"
+                cabin_source = "manual"
+                cabin_desc = f"8 kg kabin: manuel tahmin (+{cabin_cost:g} {currency}) · teklifte kabin dahil değil"
+                cabin_is_estimated = True
+            elif airline_norm == "sunexpress" and (is_sunlight or is_sunlight_scope):
+                if is_sunlight_scope:
+                    cabin_ref_eur = sunexpress_cabin_default_eur
+                    converted, note = convert_ref_eur_to_target(cabin_ref_eur, currency, manual_eur_rate)
+                    cabin_cost = converted
+                    cabin_status = "reference_estimate" if converted is not None else "unknown"
+                    cabin_source = "sunlight_starting"
+                    if converted is not None:
+                        cabin_desc = f"8 kg kabin: tahmini +€19,99 ({converted:g} {currency}) · SunLight başlangıç fiyatı"
+                    else:
+                        cabin_desc = f"8 kg kabin: tahmini +€19,99 · SunLight başlangıç fiyatı ({note})"
+                    cabin_is_estimated = True
+                else:
+                    cabin_cost = None
+                    cabin_status = "unknown"
+                    cabin_source = "out_of_scope"
+                    cabin_desc = "8 kg kabin: dahil değil · kapsamı doğrulanmamış rota"
+            elif airline_norm == "ajet" and is_ajet_de_nl_scope:
+                cabin_ref_eur = 15.0
+                converted, note = convert_ref_eur_to_target(cabin_ref_eur, currency, manual_eur_rate)
+                cabin_cost = converted
+                cabin_status = "reference_estimate" if converted is not None else "unknown"
+                cabin_source = "basic_entry"
+                if converted is not None:
+                    cabin_desc = f"8 kg kabin: tahmini +€15 ({converted:g} {currency}) · AJet Basic: kabin ücretli, bilette kontrol edin"
+                else:
+                    cabin_desc = f"8 kg kabin: tahmini +€15 · AJet Basic: kabin ücretli ({note})"
+                cabin_is_estimated = True
+            else:
+                cabin_cost = None
+                cabin_status = "unknown"
+                cabin_source = "unverified_fee"
+                cabin_desc = "8 kg kabin: dahil değil (ek ücret teklifte doğrulanmadı)"
         else:
-            # Teklifte kabin dahil değil veya bilinmiyor
-            if baggage_included_only:
-                cabin_passes_filter = False
+            # Teklifte kabin bilgisi doğrudan doğrulanmamış (verified_cabin is None)
+            # Tahmini haklar "Yalnızca doğrulanmış bagaj dahil" filtresini GEÇEMEZ!
+            cabin_passes_filter = False
 
-            # Fiyat belirleme:
-            # 1. Manuel kullanıcı ücreti girilmiş mi?
             if manual_cabin_fee is not None:
                 cabin_cost = round(float(manual_cabin_fee), 2)
                 cabin_status = "manual_estimate"
                 cabin_source = "manual"
                 cabin_desc = f"8 kg kabin: manuel tahmin (+{cabin_cost:g} {currency})"
-            # 2. Aktarmalı rota kontrolü (aktarma sayısıyla çarpılmaz, bilinmiyorsa belirsiz)
-            elif has_stops:
-                cabin_cost = None
-                cabin_status = "unknown"
-                cabin_source = "connecting_unverified"
-                cabin_desc = "8 kg kabin: aktarmalı rota için doğrulanmadı"
-            # 3. Havayolu referans kuralları
-            elif airline_norm == "thy":
-                # THY EcoFly 8 kg kabin içerir
-                cabin_cost = 0.0
-                cabin_status = "included"
-                cabin_source = "package_rule"
-                cabin_desc = "8 kg kabin: dahil · THY EcoFly varsayımı"
+                cabin_is_estimated = True
             elif airline_norm == "sunexpress":
-                # SunExpress SunValue default paketinde 8 kg (55x40x23 cm) kabin valizi fiyata dahildir
+                if is_sunvalue:
+                    # Doğrulanmış SunValue paketi kuralı
+                    cabin_cost = 0.0
+                    cabin_status = "included"
+                    cabin_source = "package_rule"
+                    cabin_desc = "8 kg kabin: dahil · SunValue paket kuralı"
+                    cabin_passes_filter = True
+                    cabin_is_estimated = False
+                elif is_sunlight:
+                    if is_sunlight_scope:
+                        cabin_ref_eur = sunexpress_cabin_default_eur
+                        converted, note = convert_ref_eur_to_target(cabin_ref_eur, currency, manual_eur_rate)
+                        cabin_cost = converted
+                        cabin_status = "reference_estimate" if converted is not None else "unknown"
+                        cabin_source = "sunlight_starting"
+                        if converted is not None:
+                            cabin_desc = f"8 kg kabin: tahmini +€19,99 ({converted:g} {currency}) · SunLight başlangıç fiyatı"
+                        else:
+                            cabin_desc = f"8 kg kabin: tahmini +€19,99 · SunLight başlangıç fiyatı ({note})"
+                        cabin_is_estimated = True
+                    else:
+                        cabin_cost = None
+                        cabin_status = "unknown"
+                        cabin_source = "out_of_scope"
+                        cabin_desc = "8 kg kabin: ücret belirsiz"
+                else:
+                    # Paket bilinmiyor: SunValue senaryosunu varsayım olarak kullan
+                    cabin_cost = 0.0
+                    cabin_status = "included"
+                    cabin_source = "sunvalue_assumption"
+                    cabin_desc = "8 kg kabin: tahminen dahil · SunValue varsayımı"
+                    cabin_is_estimated = True
+                    cabin_passes_filter = False  # Doğrulanmış filtreyi geçmez!
+            elif airline_norm == "thy":
                 cabin_cost = 0.0
                 cabin_status = "included"
-                cabin_source = "sunvalue_default"
-                cabin_desc = "8 kg kabin: dahil · SunExpress SunValue varsayımı"
+                cabin_source = "package_rule" if is_ecofly else "thy_ecofly_assumption"
+                cabin_desc = "8 kg kabin: dahil · THY EcoFly varsayımı"
+                cabin_is_estimated = (not is_ecofly)
+                cabin_passes_filter = is_ecofly
             elif airline_norm == "ajet":
-                if is_standard_ajet_europe:
+                if is_ajet_de_nl_scope:
                     cabin_ref_eur = 15.0
                     converted, note = convert_ref_eur_to_target(cabin_ref_eur, currency, manual_eur_rate)
                     cabin_cost = converted
@@ -253,13 +340,13 @@ def evaluate_leg_baggage(
                         cabin_desc = f"8 kg kabin: tahmini +€15 ({converted:g} {currency}) · AJet Basic varsayımı: kabin ücretli, bilette kontrol edin"
                     else:
                         cabin_desc = f"8 kg kabin: tahmini +€15 · AJet Basic varsayımı: kabin ücretli, bilette kontrol edin ({note})"
+                    cabin_is_estimated = True
                 else:
                     cabin_cost = None
                     cabin_status = "unknown"
                     cabin_source = "out_of_scope"
-                    cabin_desc = "8 kg kabin: ücret belirsiz (standart Almanya/Hollanda dışı hat)"
+                    cabin_desc = "8 kg kabin: ücret belirsiz · kapsamı doğrulanmamış rota/aktarma"
             elif airline_norm == "pegasus":
-                # Eylül 2026 kampanyası tarihli kampanya referansıdır; otomatik tahmin olarak kullanılmaz
                 cabin_cost = None
                 cabin_status = "unknown"
                 cabin_source = "pegasus_light_dynamic"
@@ -280,109 +367,221 @@ def evaluate_leg_baggage(
     checked_desc = "Uçak altı bagajı gerekmiyor"
     checked_ref_eur: Optional[float] = None
     checked_passes_filter = True
+    checked_is_estimated = False
 
     if checked_required_kg > 0:
-        # A) Teklif üzerinden dahil hak biliniyor mu?
-        known_included_kg: Optional[int] = None
-        if verified_checked_kg is not None and int(verified_checked_kg) >= 0:
-            known_included_kg = int(verified_checked_kg)
-        elif verified_checked is True:
-            known_included_kg = 20  # Teklifte onaylı bagaj varsa en az standart 20 kg
+        # A) Teklifte açıkça "0 kg" veya "dahil değil" okunmuş mu?
+        if verified_checked is False or verified_checked_kg == 0:
+            checked_passes_filter = False
+            # Teklifte 0 kg okunmuşsa paket kuralı ya da varsayım bunu DEĞİŞTİREMEZ!
+            if manual_checked_fee is not None:
+                checked_cost = round(float(manual_checked_fee), 2)
+                checked_status = "manual_estimate"
+                checked_source = "manual"
+                checked_desc = f"{checked_required_kg} kg uçak altı: manuel tahmin (+{checked_cost:g} {currency}) · teklifte uçak altı 0 kg"
+                checked_is_estimated = True
+            elif airline_norm == "sunexpress" and (is_sunlight or is_sunlight_scope):
+                if is_sunlight_scope and checked_required_kg <= 20:
+                    if checked_required_kg <= 5: ref_val = 19.99
+                    elif checked_required_kg <= 10: ref_val = 24.99
+                    elif checked_required_kg <= 15: ref_val = 29.99
+                    else: ref_val = 34.99
+                    checked_ref_eur = ref_val
+                    converted, note = convert_ref_eur_to_target(ref_val, currency, manual_eur_rate)
+                    checked_cost = converted
+                    checked_status = "reference_estimate" if converted is not None else "unknown"
+                    checked_source = "sunlight_starting"
+                    if converted is not None:
+                        checked_desc = f"{checked_required_kg} kg uçak altı: tahmini +€{ref_val:g} ({converted:g} {currency}) · SunLight başlangıç fiyatı"
+                    else:
+                        checked_desc = f"{checked_required_kg} kg uçak altı: tahmini +€{ref_val:g} · SunLight başlangıç fiyatı ({note})"
+                    checked_is_estimated = True
+                else:
+                    checked_cost = None
+                    checked_status = "unknown"
+                    checked_source = "excess_unverified"
+                    checked_desc = f"{checked_required_kg} kg uçak altı: 20 kg üzeri için SunLight başlangıç tarifesi bulunmuyor"
+            elif airline_norm == "ajet" and is_ajet_de_nl_scope:
+                # Bagajsız bilete ilk uçak altı tarifesi (0–10 kg €12, 11–20 kg €25)
+                if checked_required_kg <= 10:
+                    ref_val = 12.0
+                    tier_label = "0–10 kg paketi"
+                elif checked_required_kg <= 20:
+                    ref_val = 25.0
+                    tier_label = "11–20 kg paketi"
+                else:
+                    ref_val = None
+                    tier_label = None
 
-        if known_included_kg is not None and known_included_kg >= checked_required_kg:
-            checked_cost = 0.0
-            checked_status = "included"
-            checked_source = "verified_offer"
-            checked_desc = f"{known_included_kg} kg uçak altı: dahil · teklif üzerinden doğrulandı"
-            checked_passes_filter = True
-        else:
-            if baggage_included_only:
+                if ref_val is not None:
+                    checked_ref_eur = ref_val
+                    converted, note = convert_ref_eur_to_target(ref_val, currency, manual_eur_rate)
+                    checked_cost = converted
+                    checked_status = "reference_estimate" if converted is not None else "unknown"
+                    checked_source = "basic_entry"
+                    if converted is not None:
+                        checked_desc = f"{checked_required_kg} kg uçak altı: tahmini +€{ref_val:.0f} ({converted:g} {currency}) · AJet Basic varsayımı ({tier_label})"
+                    else:
+                        checked_desc = f"{checked_required_kg} kg uçak altı: tahmini +€{ref_val:.0f} · AJet Basic varsayımı ({tier_label}, {note})"
+                    checked_is_estimated = True
+                else:
+                    # 20 kg üzeri: 20 kg'lık paket yeterli sayılmaz!
+                    checked_cost = None
+                    checked_status = "unknown"
+                    checked_source = "excess_unverified"
+                    checked_desc = f"{checked_required_kg} kg uçak altı: 20 kg üzeri için online referans paket bulunmuyor"
+            else:
+                checked_cost = None
+                checked_status = "unknown"
+                checked_source = "carrier_unknown"
+                checked_desc = f"{checked_required_kg} kg uçak altı: dahil değil (ücret doğrulanmadı)"
+
+        # B) Teklif üzerinden doğrulanmış kilo bilgisi mevcut mu?
+        elif verified_checked_kg is not None and verified_checked_kg > 0:
+            if verified_checked_kg >= checked_required_kg:
+                checked_cost = 0.0
+                checked_status = "included"
+                checked_source = "verified_offer"
+                checked_desc = f"{verified_checked_kg} kg uçak altı: dahil · teklif üzerinden doğrulandı"
+                checked_passes_filter = True
+                checked_is_estimated = False
+            else:
+                # Eksik kilo mevcut (dahil_kg < istenen_kg)
+                missing_kg = checked_required_kg - verified_checked_kg
                 checked_passes_filter = False
+                # İlk bagaj tarifeleri (0-10/11-20 kg) dahil hakkın üstüne ek kilo için KULLANILAMAZ!
+                if manual_checked_fee is not None:
+                    checked_cost = round(float(manual_checked_fee), 2)
+                    checked_status = "manual_estimate"
+                    checked_source = "manual"
+                    checked_desc = f"{checked_required_kg} kg uçak altı ({missing_kg} kg eksik): manuel tahmin (+{checked_cost:g} {currency})"
+                    checked_is_estimated = True
+                else:
+                    checked_cost = None
+                    checked_status = "unknown"
+                    checked_source = "excess_unverified"
+                    checked_desc = f"{checked_required_kg} kg uçak altı ({verified_checked_kg} kg dahil, {missing_kg} kg eksik): fazla bagaj ücreti teklifte doğrulanmadı"
 
-            # Eksik kilo hesabı
-            base_included = known_included_kg or 0
-            missing_kg = max(0, checked_required_kg - base_included)
+        # C) Teklifte "bagaj dahil" işareti var ama kilo yok -> ASLA 20 kg ATAMA!
+        elif verified_checked is True and verified_checked_kg is None:
+            # "Uçak altı dahil · kilo doğrulanmadı" göster. Doğrulanmış filtreyi geçmez.
+            checked_passes_filter = False
+            if manual_checked_fee is not None:
+                checked_cost = round(float(manual_checked_fee), 2)
+                checked_status = "manual_estimate"
+                checked_source = "manual"
+                checked_desc = f"{checked_required_kg} kg uçak altı: manuel tahmin (+{checked_cost:g} {currency}) · teklifte uçak altı dahil (kilo doğrulanmadı)"
+                checked_is_estimated = True
+            else:
+                checked_cost = None
+                checked_status = "unknown"
+                checked_source = "unverified_kg"
+                checked_desc = f"{checked_required_kg} kg uçak altı: Uçak altı dahil · kilo doğrulanmadı"
 
-            # 1. Manuel kullanıcı ücreti girilmiş mi?
+        # D) Teklifte uçak altı bilgisi doğrudan belirtilmemiş (verified_checked is None)
+        else:
+            checked_passes_filter = False
+
             if manual_checked_fee is not None:
                 checked_cost = round(float(manual_checked_fee), 2)
                 checked_status = "manual_estimate"
                 checked_source = "manual"
                 checked_desc = f"{checked_required_kg} kg uçak altı: manuel tahmin (+{checked_cost:g} {currency})"
-            # 2. Aktarmalı rota kontrolü
-            elif has_stops:
-                checked_cost = None
-                checked_status = "unknown"
-                checked_source = "connecting_unverified"
-                checked_desc = f"{checked_required_kg} kg uçak altı: aktarmalı rota için doğrulanmadı"
-            # 3. Havayolu referans kuralları
+                checked_is_estimated = True
             elif airline_norm == "sunexpress":
-                # SunExpress standart Avrupa/uluslararası hatlarında default paket SunValue'dur (20 kg kayıtlı bagaj fiyata dahildir).
-                # 20 kg üzeri ihtiyaçlarda SunEco+ (30 kg) ve SunComfort (35 kg) paket yükseltmeleri uygulanır.
-                if checked_required_kg <= 20:
-                    checked_cost = 0.0
-                    checked_status = "included"
-                    checked_source = "sunvalue_default"
-                    checked_desc = f"{checked_required_kg} kg uçak altı: dahil (20 kg'a kadar) · SunExpress SunValue varsayımı"
-                elif checked_required_kg <= 30:
-                    # SunEco+ paketi (30 kg) referans paket yükseltme farkı: ~€15.00
-                    checked_ref_eur = 15.0
-                    converted, note = convert_ref_eur_to_target(checked_ref_eur, currency, manual_eur_rate)
-                    checked_cost = converted
-                    checked_status = "reference_estimate" if converted is not None else "unknown"
-                    checked_source = "suneco_upgrade"
-                    if converted is not None:
-                        checked_desc = f"{checked_required_kg} kg uçak altı: tahmini +€{checked_ref_eur:.0f} ({converted:g} {currency}) · SunExpress SunEco+ (30 kg) paket yükseltme varsayımı"
+                if is_sunvalue:
+                    if checked_required_kg <= 20:
+                        checked_cost = 0.0
+                        checked_status = "included"
+                        checked_source = "package_rule"
+                        checked_desc = f"{checked_required_kg} kg uçak altı: dahil (20 kg'a kadar) · SunValue paket kuralı"
+                        checked_passes_filter = True
+                        checked_is_estimated = False
                     else:
-                        checked_desc = f"{checked_required_kg} kg uçak altı: tahmini +€{checked_ref_eur:.0f} · SunExpress SunEco+ (30 kg) paket yükseltme varsayımı ({note})"
-                elif checked_required_kg <= 35:
-                    # SunComfort paketi (35 kg) referans paket yükseltme farkı: ~€45.00
-                    checked_ref_eur = 45.0
-                    converted, note = convert_ref_eur_to_target(checked_ref_eur, currency, manual_eur_rate)
-                    checked_cost = converted
-                    checked_status = "reference_estimate" if converted is not None else "unknown"
-                    checked_source = "suncomfort_upgrade"
-                    if converted is not None:
-                        checked_desc = f"{checked_required_kg} kg uçak altı: tahmini +€{checked_ref_eur:.0f} ({converted:g} {currency}) · SunExpress SunComfort (35 kg) paket yükseltme varsayımı"
+                        # 20 kg üzeri için sabit €15 veya €45 üretme!
+                        checked_cost = None
+                        checked_status = "unknown"
+                        checked_source = "excess_unverified"
+                        checked_desc = f"{checked_required_kg} kg uçak altı: 20 kg üzeri paket farkı teklifte doğrulanmadı"
+                elif is_sunlight:
+                    if is_sunlight_scope and checked_required_kg <= 20:
+                        if checked_required_kg <= 5: ref_val = 19.99
+                        elif checked_required_kg <= 10: ref_val = 24.99
+                        elif checked_required_kg <= 15: ref_val = 29.99
+                        else: ref_val = 34.99
+                        checked_ref_eur = ref_val
+                        converted, note = convert_ref_eur_to_target(ref_val, currency, manual_eur_rate)
+                        checked_cost = converted
+                        checked_status = "reference_estimate" if converted is not None else "unknown"
+                        checked_source = "sunlight_starting"
+                        if converted is not None:
+                            checked_desc = f"{checked_required_kg} kg uçak altı: tahmini +€{ref_val:g} ({converted:g} {currency}) · SunLight başlangıç fiyatı"
+                        else:
+                            checked_desc = f"{checked_required_kg} kg uçak altı: tahmini +€{ref_val:g} · SunLight başlangıç fiyatı ({note})"
+                        checked_is_estimated = True
                     else:
-                        checked_desc = f"{checked_required_kg} kg uçak altı: tahmini +€{checked_ref_eur:.0f} · SunExpress SunComfort (35 kg) paket yükseltme varsayımı ({note})"
+                        checked_cost = None
+                        checked_status = "unknown"
+                        checked_source = "excess_unverified"
+                        checked_desc = f"{checked_required_kg} kg uçak altı: 20 kg üzeri için SunLight başlangıç tarifesi bulunmuyor"
                 else:
-                    checked_cost = None
-                    checked_status = "unknown"
-                    checked_source = "excess_unverified"
-                    checked_desc = f"{checked_required_kg} kg uçak altı: 35 kg üzeri için fazla bagaj ücreti teklifte doğrulanmadı"
+                    # Paket bilinmiyor: SunValue senaryosunu varsayım olarak kullan
+                    if checked_required_kg <= 20:
+                        checked_cost = 0.0
+                        checked_status = "included"
+                        checked_source = "sunvalue_assumption"
+                        checked_desc = f"{checked_required_kg} kg uçak altı: tahminen dahil (20 kg'a kadar) · SunValue varsayımı"
+                        checked_is_estimated = True
+                        checked_passes_filter = False  # Doğrulanmış filtreyi geçmez!
+                    else:
+                        # 20 kg üzeri için sabit €15 veya €45 üretme!
+                        checked_cost = None
+                        checked_status = "unknown"
+                        checked_source = "excess_unverified"
+                        checked_desc = f"{checked_required_kg} kg uçak altı: 20 kg üzeri için paket farkı doğrulanmadı"
             elif airline_norm == "ajet":
-                if is_standard_ajet_europe:
+                if is_ajet_de_nl_scope:
                     # AJet Almanya/Hollanda online: 0–10 kg €12, 11–20 kg €25
-                    if missing_kg <= 10:
+                    if checked_required_kg <= 10:
                         ref_val = 12.0
                         tier_label = "0–10 kg paketi"
-                    else:
+                    elif checked_required_kg <= 20:
                         ref_val = 25.0
                         tier_label = "11–20 kg paketi"
-
-                    checked_ref_eur = ref_val
-                    converted, note = convert_ref_eur_to_target(checked_ref_eur, currency, manual_eur_rate)
-                    checked_cost = converted
-                    checked_status = "reference_estimate" if converted is not None else "unknown"
-                    checked_source = "basic_entry"
-                    if converted is not None:
-                        checked_desc = f"{checked_required_kg} kg uçak altı: tahmini +€{checked_ref_eur:.0f} ({converted:g} {currency}) · AJet Basic varsayımı ({tier_label})"
                     else:
-                        checked_desc = f"{checked_required_kg} kg uçak altı: tahmini +€{checked_ref_eur:.0f} · AJet Basic varsayımı ({tier_label}, {note})"
+                        ref_val = None
+                        tier_label = None
+
+                    if ref_val is not None:
+                        checked_ref_eur = ref_val
+                        converted, note = convert_ref_eur_to_target(ref_val, currency, manual_eur_rate)
+                        checked_cost = converted
+                        checked_status = "reference_estimate" if converted is not None else "unknown"
+                        checked_source = "basic_entry"
+                        if converted is not None:
+                            checked_desc = f"{checked_required_kg} kg uçak altı: tahmini +€{ref_val:.0f} ({converted:g} {currency}) · AJet Basic varsayımı ({tier_label})"
+                        else:
+                            checked_desc = f"{checked_required_kg} kg uçak altı: tahmini +€{ref_val:.0f} · AJet Basic varsayımı ({tier_label}, {note})"
+                        checked_is_estimated = True
+                    else:
+                        # 20 kg üzeri için 20 kg paketi yeterli sayılmaz!
+                        checked_cost = None
+                        checked_status = "unknown"
+                        checked_source = "excess_unverified"
+                        checked_desc = f"{checked_required_kg} kg uçak altı: 20 kg üzeri için online referans paket bulunmuyor"
                 else:
                     checked_cost = None
                     checked_status = "unknown"
                     checked_source = "out_of_scope"
-                    checked_desc = f"{checked_required_kg} kg uçak altı: ücret belirsiz (standart Almanya/Hollanda dışı hat)"
+                    checked_desc = f"{checked_required_kg} kg uçak altı: ücret belirsiz · kapsamı doğrulanmamış rota/aktarma"
             elif airline_norm == "thy":
-                # EcoFly uçak altı hakkı rotaya bağlıdır; her bilete sabit 15 kg veya 0 kg atanmaz
+                # EcoFly uçak altı hakkı rotaya bağlıdır; teklifte fiyat yoksa belirsiz
                 checked_cost = None
                 checked_status = "unknown"
                 checked_source = "thy_ecofly_variable"
                 checked_desc = f"{checked_required_kg} kg uçak altı: ücret belirsiz · THY EcoFly rotaya bağlı, teklifte fiyat yok"
             elif airline_norm == "pegasus":
-                # Pegasus Light dinamik fiyatlandırma; Eylül 2026 kampanya rakamları otomatik tahmin olarak uygulanmaz
+                # Pegasus Light dinamik fiyatlandırma; otomatik tahmin uygulanmaz
                 checked_cost = None
                 checked_status = "unknown"
                 checked_source = "pegasus_light_dynamic"
@@ -394,41 +593,58 @@ def evaluate_leg_baggage(
                 checked_desc = f"{checked_required_kg} kg uçak altı: ücret belirsiz · taşıyıcı referansı yok"
 
     # -------------------------------------------------------------
-    # 3. BACAK TOPLAM BAGAJ MALİYETİ
+    # 3. BACAK TOPLAM VE BİLİNEN MALİYETLER
     # -------------------------------------------------------------
     passes_filter = cabin_passes_filter and checked_passes_filter
 
+    known_cabin = cabin_cost if cabin_cost is not None else 0.0
+    known_checked = checked_cost if checked_cost is not None else 0.0
+    leg_known_cost = round(known_cabin + known_checked, 2)
+
     if cabin_cost is not None and checked_cost is not None:
-        leg_baggage_cost = round(cabin_cost + checked_cost, 2)
+        leg_baggage_cost = leg_known_cost
         leg_cost_known = True
     else:
         leg_baggage_cost = None
         leg_cost_known = False
 
-    summary_parts = []
-    if cabin_required:
-        summary_parts.append(cabin_desc)
-    if checked_required_kg > 0:
-        summary_parts.append(checked_desc)
+    is_estimated = (cabin_is_estimated or checked_is_estimated)
 
-    if not summary_parts:
-        if airline_norm == "sunexpress":
-            summary_parts.append("SunExpress SunValue: 8 kg kabin ve 20 kg kayıtlı bagaj fiyata dahildir")
-        elif airline_norm == "thy":
-            summary_parts.append("THY EcoFly: 8 kg kabin valizi fiyata dahildir (uçak altı rotaya bağlıdır)")
-        elif airline_norm == "ajet":
-            summary_parts.append("AJet Basic: 4 kg koltuk altı çantası ücretsiz (kabin/uçak altı ek ücrete tabidir)")
-        elif airline_norm == "pegasus":
-            summary_parts.append("Pegasus Light: 3 kg koltuk altı çantası ücretsiz (kabin/uçak altı ek ücrete tabidir)")
+    # -------------------------------------------------------------
+    # 4. AÇIKLAMA METNİ (Özet)
+    # -------------------------------------------------------------
+    summary_parts = []
+    if airline_norm == "sunexpress" and (not pkg_raw or is_sunvalue):
+        if not cabin_required and checked_required_kg == 0:
+            if is_sunvalue:
+                summary_parts.append("SunValue: 8 kg kabin ve 20 kg kayıtlı bagaj fiyata dahildir")
+            else:
+                summary_parts.append("SunValue varsayımı · 8 kg kabin + 20 kg uçak altı tahminen dahil")
+        elif (cabin_status == "included") and (checked_status == "included" or not checked_required_kg):
+            if is_sunvalue:
+                summary_parts.append("SunValue paket kuralı · 8 kg kabin ve 20 kg uçak altı fiyata dahildir")
+            else:
+                summary_parts.append("SunValue varsayımı · 8 kg kabin + 20 kg uçak altı tahminen dahil")
         else:
-            summary_parts.append("Standart bilet paketi (ek bagaj seçilmedi)")
+            if cabin_required:
+                summary_parts.append(cabin_desc)
+            if checked_required_kg > 0:
+                summary_parts.append(checked_desc)
     else:
-        # SunExpress için tek bir ürün seçilmişse diğer dahil hakkı da kullanıcıya net şekilde hatırlat
-        if airline_norm == "sunexpress":
-            if cabin_required and checked_required_kg == 0:
-                summary_parts.append("SunValue: 20 kg kayıtlı bagaj da fiyata dahildir")
-            elif not cabin_required and checked_required_kg <= 20:
-                summary_parts.append("SunValue: 8 kg kabin valizi de fiyata dahildir")
+        if cabin_required:
+            summary_parts.append(cabin_desc)
+        if checked_required_kg > 0:
+            summary_parts.append(checked_desc)
+
+        if not summary_parts:
+            if airline_norm == "thy":
+                summary_parts.append("THY EcoFly: 8 kg kabin valizi fiyata dahildir (uçak altı rotaya bağlıdır)")
+            elif airline_norm == "ajet":
+                summary_parts.append("AJet Basic: 4 kg koltuk altı çantası ücretsiz (kabin/uçak altı ek ücrete tabidir)")
+            elif airline_norm == "pegasus":
+                summary_parts.append("Pegasus Light: 3 kg koltuk altı çantası ücretsiz (kabin/uçak altı ek ücrete tabidir)")
+            else:
+                summary_parts.append("Standart bilet paketi (ek bagaj seçilmedi)")
 
     leg_summary = " · ".join(summary_parts)
 
@@ -448,8 +664,10 @@ def evaluate_leg_baggage(
         checked_ref_eur=checked_ref_eur,
         checked_passes_filter=checked_passes_filter,
         leg_baggage_cost=leg_baggage_cost,
+        leg_known_cost=leg_known_cost,
         leg_cost_known=leg_cost_known,
         leg_summary_text=leg_summary,
         personal_bag_info=personal_info,
         passes_filter=passes_filter,
+        is_estimated=is_estimated,
     )

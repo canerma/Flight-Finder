@@ -2461,8 +2461,9 @@
       }
 
       const combos = data.combinations || [];
+      const bestKnown = combos.find(c => c.baggage_cost_known && c.grand_total_price !== null);
       document.getElementById("mBestPrice").textContent =
-        combos.length > 0 ? fmtMoney(combos[0].grand_total_price, curr) : "-";
+        bestKnown ? fmtMoney(bestKnown.grand_total_price, curr) : (combos.length > 0 ? "Maliyet Belirsiz" : "-");
 
       // 1) Kart Görünümü (En İyi 25)
       const cardsEl = document.getElementById("viewCards");
@@ -2482,18 +2483,29 @@
 
           const baggageKnownBadge = !c.baggage_cost_known
             ? `<span class="badge" style="background: rgba(245, 158, 11, 0.18); color: #f59e0b; border: 1px solid rgba(245, 158, 11, 0.35);">⚠️ Bagaj Ücreti Belirsiz</span>`
-            : "";
+            : (c.baggage_is_estimated
+                ? `<span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.3);">ℹ️ Tahmini Bagaj Hesabı</span>`
+                : `<span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3);">✅ Doğrulanmış Bagaj</span>`);
 
-          const breakdownParts = [`2 Bağımsız Uçuş: ${fmtMoney(c.flight_total_price, curr)}`];
-          if (c.baggage_cost_known && c.baggage_total_price > 0) {
-            breakdownParts.push(`Tahmini Bagaj: +${fmtMoney(c.baggage_total_price, curr)}`);
-          }
-          if (c.transfer_total_price > 0) {
-            breakdownParts.push(`Tahmini Transfer: +${fmtMoney(c.transfer_total_price, curr)}`);
-          }
-          let trSub = `<div class="sub">${breakdownParts.join(" · ")}</div>`;
-          if (!c.baggage_cost_known) {
-            trSub = `<div class="sub" style="color: #f59e0b;">*Uçuş tabanı (${fmtMoney(c.flight_total_price, curr)}) gösterilmektedir; ek bagaj ücreti dahil değildir.</div>`;
+          let priceHtml = "";
+          let trSub = "";
+          if (c.baggage_cost_known && c.grand_total_price !== null) {
+            const estTag = c.baggage_is_estimated
+              ? `<span style="font-size:0.72rem; color:#93c5fd; font-weight:600;">(Tahmini)</span>`
+              : "";
+            priceHtml = `<div class="total">${fmtMoney(c.grand_total_price, curr)} ${estTag}</div>`;
+            const breakdownParts = [`2 Uçuş: ${fmtMoney(c.flight_total_price, curr)}`];
+            if (c.baggage_total_price > 0) {
+              breakdownParts.push(`Bagaj: +${fmtMoney(c.baggage_total_price, curr)}`);
+            }
+            if (c.transfer_total_price > 0) {
+              breakdownParts.push(`Transfer: +${fmtMoney(c.transfer_total_price, curr)}`);
+            }
+            trSub = `<div class="sub">${breakdownParts.join(" · ")}</div>`;
+          } else {
+            const missingTxt = c.missing_baggage_note ? ` · ${c.missing_baggage_note}` : "";
+            priceHtml = `<div class="total" style="color: #fbbf24;">${fmtMoney(c.known_subtotal_price, curr)} <span style="font-size:0.72rem; color:#cbd5e1; font-weight:normal;">(bilinen ara toplam)</span></div>`;
+            trSub = `<div class="sub" style="color: #fbbf24;">${fmtMoney(c.known_subtotal_price, curr)} bilinen ara toplam${missingTxt}</div>`;
           }
 
           const outExtra = [];
@@ -2518,7 +2530,7 @@
                   </div>
                 </div>
                 <div class="combo-price">
-                  <div class="total">${fmtMoney(c.grand_total_price, curr)}${!c.baggage_cost_known ? '*' : ''}</div>
+                  ${priceHtml}
                   ${trSub}
                 </div>
               </div>
@@ -2608,11 +2620,17 @@
               ${combos.map((c, i) => `
                 <tr>
                   <td>${i + 1}</td>
-                  <td><b style="color: var(--accent)">${fmtMoney(c.grand_total_price, curr)}${!c.baggage_cost_known ? ' ⚠️*' : ''}</b></td>
+                  <td>${c.baggage_cost_known && c.grand_total_price !== null
+                    ? `<b style="color: var(--accent)">${fmtMoney(c.grand_total_price, curr)}${c.baggage_is_estimated ? ' (tahmini)' : ''}</b>`
+                    : `<span style="color:#fbbf24;" title="${c.missing_baggage_note || 'Bagaj ücreti belirsiz'}">${fmtMoney(c.known_subtotal_price, curr)} (ara toplam ⚠️)</span>`
+                  }</td>
                   <td>${fmtMoney(c.flight_total_price, curr)}</td>
                   <td><span style="font-size:0.75rem;">${c.out_baggage_desc || "-"}</span></td>
                   <td><span style="font-size:0.75rem;">${c.in_baggage_desc || "-"}</span></td>
-                  <td>${c.baggage_cost_known ? (c.baggage_total_price > 0 ? fmtMoney(c.baggage_total_price, curr) : 'Dahil / Yok') : '<span style="color:#f59e0b;">Belirsiz</span>'}</td>
+                  <td>${c.baggage_cost_known && c.baggage_total_price !== null
+                    ? (c.baggage_total_price > 0 ? fmtMoney(c.baggage_total_price, curr) : 'Dahil / Yok')
+                    : `<span style="color:#f59e0b;">${c.known_baggage_total_price > 0 ? '+' + fmtMoney(c.known_baggage_total_price, curr) + ' (kısmi)' : 'Belirsiz'}</span>`
+                  }</td>
                   <td>${fmtMoney(c.transfer_total_price, curr)}</td>
                   <td>${c.stay_days} gece<br><span style="font-size:0.72rem; color:${c.includes_weekend ? '#34d399' : (c.weekend_days_count > 0 ? '#fbbf24' : '#94a3b8')}; font-weight:600;">${c.includes_weekend ? '🏖️ Cmt &amp; Paz' : (c.weekend_days_count > 0 ? '🗓️ ' + c.weekend_label : '🗓️ Hafta İçi')}</span></td>
                   <td>${c.out_date} → ${c.out_arrival_date || "?"}</td>
@@ -2761,7 +2779,7 @@
       }
       const rows = lastResponse.combinations;
       const headers = [
-        "grand_total_price", "flight_total_price", "baggage_total_price", "baggage_cost_known", "transfer_total_price", "stay_days",
+        "grand_total_price", "known_subtotal_price", "flight_total_price", "baggage_total_price", "baggage_cost_known", "missing_baggage_note", "transfer_total_price", "stay_days",
         "out_date", "out_arrival_date", "out_origin", "out_destination", "out_airline", "out_departure_time", "out_arrival_time", "out_duration", "out_stops_text", "out_price", "out_baggage_cost", "out_baggage_desc", "out_personal_bag_info",
         "in_date", "in_arrival_date", "in_origin", "in_destination", "in_airline", "in_departure_time", "in_arrival_time", "in_duration", "in_stops_text", "in_price", "in_baggage_cost", "in_baggage_desc", "in_personal_bag_info",
         "out_booking_url", "in_booking_url"

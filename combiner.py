@@ -316,6 +316,7 @@ def build_combinations_dataframe(
         return pd.Series(
             [
                 r.leg_baggage_cost,
+                r.leg_known_cost,
                 r.cabin_cost,
                 r.checked_cost,
                 r.cabin_status,
@@ -326,10 +327,11 @@ def build_combinations_dataframe(
                 r.personal_bag_info,
                 r.leg_cost_known,
                 r.passes_filter,
-                (r.cabin_status in ("reference_estimate", "manual_estimate") or r.checked_status in ("reference_estimate", "manual_estimate")),
+                r.is_estimated,
             ],
             index=[
                 "baggage_cost",
+                "baggage_known_cost",
                 "cabin_cost",
                 "checked_cost",
                 "cabin_status",
@@ -358,6 +360,7 @@ def build_combinations_dataframe(
         return pd.Series(
             [
                 r.leg_baggage_cost,
+                r.leg_known_cost,
                 r.cabin_cost,
                 r.checked_cost,
                 r.cabin_status,
@@ -368,10 +371,11 @@ def build_combinations_dataframe(
                 r.personal_bag_info,
                 r.leg_cost_known,
                 r.passes_filter,
-                (r.cabin_status in ("reference_estimate", "manual_estimate") or r.checked_status in ("reference_estimate", "manual_estimate")),
+                r.is_estimated,
             ],
             index=[
                 "baggage_cost",
+                "baggage_known_cost",
                 "cabin_cost",
                 "checked_cost",
                 "cabin_status",
@@ -514,14 +518,34 @@ def build_combinations_dataframe(
     # 6) Bağımsız bacak bagaj toplamı ve bilinirlik durumu (Vektörel)
     both_cost_known = combos["out_baggage_cost_known"].astype(bool) & combos["in_baggage_cost_known"].astype(bool)
     combos["baggage_cost_known"] = both_cost_known
-    combos["baggage_total_price"] = pd.Series(index=combos.index, dtype="float64")
-    combos.loc[both_cost_known, "baggage_total_price"] = (
-        combos.loc[both_cost_known, "out_baggage_cost"].astype(float)
-        + combos.loc[both_cost_known, "in_baggage_cost"].astype(float)
+
+    combos["out_baggage_known_cost"] = combos["out_baggage_known_cost"].fillna(0.0).astype(float)
+    combos["in_baggage_known_cost"] = combos["in_baggage_known_cost"].fillna(0.0).astype(float)
+    combos["known_baggage_total_price"] = (
+        combos["out_baggage_known_cost"] + combos["in_baggage_known_cost"]
     ).round(2)
+
+    combos["baggage_total_price"] = pd.Series(index=combos.index, dtype="object")
+    combos.loc[both_cost_known, "baggage_total_price"] = combos.loc[both_cost_known, "known_baggage_total_price"]
+
     combos["baggage_is_estimated"] = (
         combos["out_baggage_is_estimated"].astype(bool) | combos["in_baggage_is_estimated"].astype(bool)
     )
+
+    # Eksik bagaj açıklama notu (örn: "dönüş bagajı hariç")
+    out_k_s = combos["out_baggage_cost_known"].astype(bool)
+    in_k_s = combos["in_baggage_cost_known"].astype(bool)
+    missing_notes = []
+    for ok, ik in zip(out_k_s, in_k_s):
+        if not ok and not ik:
+            missing_notes.append("gidiş ve dönüş bagajı hariç")
+        elif not ok:
+            missing_notes.append("gidiş bagajı hariç")
+        elif not ik:
+            missing_notes.append("dönüş bagajı hariç")
+        else:
+            missing_notes.append("")
+    combos["missing_baggage_note"] = missing_notes
 
     # 7) Kara ulaşımı (transfer) maliyeti ve süresi
     # Eksik transfer maliyetini sessizce 0 kabul ederek daha ucuz seçenek üretme!
@@ -568,15 +592,22 @@ def build_combinations_dataframe(
         combos["transfer_is_estimated"] = False
 
     # Fiyat toplamları
-    combos["flight_total_price"] = combos["out_price"] + combos["in_price"]
+    combos["flight_total_price"] = (combos["out_price"] + combos["in_price"]).round(2)
     combos["transfer_total_price"] = (
         combos["out_transfer_cost"] + combos["in_transfer_cost"]
-    )
-    combos["grand_total_price"] = (
+    ).round(2)
+
+    # bilinen_ara_toplam = gidiş_bileti + dönüş_bileti + bilinen_bagaj_ücretleri + etkinse_transfer
+    combos["known_subtotal_price"] = (
         combos["flight_total_price"]
-        + combos["baggage_total_price"].fillna(0.0).astype(float)
+        + combos["known_baggage_total_price"]
         + combos["transfer_total_price"]
     ).round(2)
+
+    # bagaj_dahil_toplam = bilinen_ara_toplam (yalnızca gerekli bütün bagaj ücretleri hesaplandıysa),
+    # aksi halde null (None)!
+    combos["grand_total_price"] = pd.Series(index=combos.index, dtype="object")
+    combos.loc[both_cost_known, "grand_total_price"] = combos.loc[both_cost_known, "known_subtotal_price"]
 
     # Süre toplamları: süresi bilinmeyen uçuşları 0 dakika gösterme veya en kısa uçuş olarak sıralama!
     out_dur_valid = combos["out_duration_minutes"].notna() & (combos["out_duration_minutes"] > 0)
@@ -619,11 +650,14 @@ def build_combinations_dataframe(
 
     # Toplam maliyete ve ardından toplam seyahat süresine göre sırala (süresi bilinmeyenler en sona!)
     # Bagaj maliyeti tam bilinenler önce sıralanır; belirsiz olanlar asla ücretsizmiş gibi öne geçmez!
+    # Bilinenler grand_total_price'a göre, belirsizler known_subtotal_price'a göre sıralanır.
+    combos["_sort_price"] = pd.to_numeric(combos["grand_total_price"], errors="coerce").fillna(combos["known_subtotal_price"]).astype(float)
     combos = combos.sort_values(
-        by=["baggage_cost_known", "grand_total_price", "total_travel_minutes"],
-        ascending=[False, True, True],
+        by=["baggage_cost_known", "_sort_price", "flight_total_price", "total_travel_minutes"],
+        ascending=[False, True, True, True],
         na_position="last",
     ).reset_index(drop=True)
+    combos = combos.drop(columns=["_sort_price"])
 
     # Görüntüleme limitini tüm filtreler ve sıralama tamamlandıktan SONRA uygula
     if display_limit is not None and int(display_limit) > 0:
